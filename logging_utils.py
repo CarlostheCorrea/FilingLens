@@ -55,3 +55,12 @@ def log_verification(proposal_id: str, claim_id: str, verdict: str):
         "claim_id": claim_id,
         "verdict": verdict,
     })
+
+
+def log_compare(compare_run_id: str, tickers: list[str], filing_events: list, company_count: int):
+    _log("compare", {
+        "compare_run_id": compare_run_id,
+        "tickers": tickers,
+        "company_count": company_count,
+        "filing_events_count": len(filing_events),
+    })

@@ -11,6 +11,11 @@ const state = {
   dateRange: ['', ''],
   answer: null,
   currentQuery: '',
+  compare: null,
+  compareChart: null,
+  compareFormTypes: ['10-K', '10-Q', '8-K', '20-F', '6-K'],
+  compareDateRange: ['', ''],
+  compareLookback: '3M',
   manualTickers: [],   // Manual tab tickers
   manualFormTypes: ['10-K', '10-Q'],
   manualDateRange: ['', ''],
@@ -83,6 +88,16 @@ function getAnswerPayload(data) {
 function getAuditClaims(data) {
   const answer = getAnswerPayload(data);
   return answer.claims_audit?.claims || answer.claims || [];
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  const sign = Number(value) > 0 ? '+' : '';
+  return `${sign}${Number(value).toFixed(2)}%`;
+}
+
+function compareEventId(event) {
+  return `${event.ticker}-${event.accession_number}`;
 }
 
 /* ═══════════════════════════════════════════
@@ -680,6 +695,308 @@ async function loadEvidence(claimId) {
 }
 
 /* ═══════════════════════════════════════════
+   COMPARE COMPANIES
+   ═══════════════════════════════════════════ */
+function toggleCompareForm(chip) {
+  const type = chip.dataset.type;
+  chip.classList.toggle('active');
+  if (chip.classList.contains('active')) {
+    if (!state.compareFormTypes.includes(type)) state.compareFormTypes.push(type);
+  } else {
+    state.compareFormTypes = state.compareFormTypes.filter(t => t !== type);
+  }
+}
+
+function setCompareTimePreset(years) {
+  const startId = 'compare-date-start';
+  const endId = 'compare-date-end';
+  if (years === 'custom') {
+    $(startId).focus();
+  } else {
+    $(startId).value = yearsAgo(years);
+    $(endId).value = today();
+    state.compareDateRange = [$(startId).value, $(endId).value];
+  }
+  $('compare-time-presets').querySelectorAll('.time-preset-btn').forEach(btn => {
+    btn.classList.toggle('active',
+      (years === 'custom' && btn.textContent === 'Custom') ||
+      (years !== 'custom' && btn.textContent === `${years}Y`)
+    );
+  });
+}
+
+function setCompareLookback(lookback) {
+  state.compareLookback = lookback;
+  $('compare-lookback-presets').querySelectorAll('.time-preset-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent === lookback);
+  });
+}
+
+async function runCompare(forceRefresh = false) {
+  const tickerA = $('compare-ticker-a').value.trim().toUpperCase();
+  const tickerB = $('compare-ticker-b').value.trim().toUpperCase();
+  const query = $('compare-query-input').value.trim();
+  const filingDateRange = [
+    $('compare-date-start').value,
+    $('compare-date-end').value,
+  ];
+
+  if (!tickerA || !tickerB) {
+    alert('Enter two ticker symbols.');
+    return;
+  }
+  if (tickerA === tickerB) {
+    alert('Use two different ticker symbols.');
+    return;
+  }
+  if (!query) {
+    alert('Enter a comparison question.');
+    return;
+  }
+  if (!state.compareFormTypes.length) {
+    alert('Select at least one filing type.');
+    return;
+  }
+  if (!filingDateRange[0] || !filingDateRange[1]) {
+    alert('Choose a filing date range.');
+    return;
+  }
+
+  show('compare-results-panel');
+  show('compare-loading');
+  hide('compare-summary-section');
+  hide('compare-company-section');
+  hide('compare-chart-section');
+  hide('compare-events-section');
+  hide('compare-cached-badge');
+  $('compare-status').textContent = 'Running compare workflow…';
+  $('compare-results-panel').scrollIntoView({ behavior: 'smooth' });
+  log(`Comparing ${tickerA} vs ${tickerB}${forceRefresh ? ' (refresh)' : ''}…`, 'info');
+
+  try {
+    const res = await fetch(`/api/compare${forceRefresh ? '?refresh=true' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticker_a: tickerA,
+        ticker_b: tickerB,
+        query,
+        form_types: state.compareFormTypes,
+        filing_date_range: filingDateRange,
+        price_lookback: state.compareLookback,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    const data = await res.json();
+    state.compare = data;
+    $('compare-status').textContent = '';
+
+    if (data.from_cache) {
+      show('compare-cached-badge');
+      log(`Compare served from cache for ${tickerA} vs ${tickerB}`, 'success');
+    } else {
+      hide('compare-cached-badge');
+      log(`Compare complete: ${data.company_comparisons.length} company summaries, ${data.filing_events.length} filing events`, 'success');
+    }
+    renderCompare(data);
+  } catch (err) {
+    hide('compare-loading');
+    $('compare-status').textContent = '';
+    log('Compare error: ' + err.message, 'error');
+  }
+}
+
+function renderCompare(data) {
+  hide('compare-loading');
+
+  $('compare-overall-summary').textContent = data.overall_summary || '';
+  $('compare-similarities').innerHTML = (data.similarities || []).map(item => `<li>${item}</li>`).join('');
+  $('compare-differences').innerHTML = (data.differences || []).map(item => `<li>${item}</li>`).join('');
+  show('compare-summary-section');
+
+  const comparisons = data.company_comparisons || [];
+  $('compare-company-list').innerHTML = comparisons.map(buildCompareCompanyCard).join('');
+  show('compare-company-section');
+
+  renderCompareChart(data.stock_series || [], data.filing_events || []);
+  show('compare-chart-section');
+
+  $('compare-events-body').innerHTML = (data.filing_events || []).map(event => `
+    <tr onclick="showCompareEventDetail('${compareEventId(event)}')" class="compare-event-row">
+      <td>${event.ticker}</td>
+      <td>${event.form_type || '—'}</td>
+      <td>${event.filing_date || '—'}</td>
+      <td>${event.trading_date || '—'}</td>
+      <td class="${Number(event.return_1d) > 0 ? 'positive' : Number(event.return_1d) < 0 ? 'negative' : ''}">${formatPercent(event.return_1d)}</td>
+      <td class="${Number(event.return_5d) > 0 ? 'positive' : Number(event.return_5d) < 0 ? 'negative' : ''}">${formatPercent(event.return_5d)}</td>
+      <td class="${Number(event.return_30d) > 0 ? 'positive' : Number(event.return_30d) < 0 ? 'negative' : ''}">${formatPercent(event.return_30d)}</td>
+    </tr>
+  `).join('');
+  if ((data.filing_events || []).length) {
+    show('compare-events-section');
+    showCompareEventDetail(compareEventId(data.filing_events[0]));
+  } else {
+    hide('compare-events-section');
+  }
+}
+
+function buildCompareCompanyCard(comparison) {
+  const statusClass = comparison.status === 'supported' ? 'deep-dive-supported' : 'deep-dive-insufficient';
+  const statusLabel = comparison.status === 'supported' ? 'Supported' : 'Insufficient Evidence';
+  const evidence = (comparison.evidence || []).map(item => `
+    <div class="deep-dive-evidence-item">
+      <div class="deep-dive-evidence-meta">
+        ${comparison.ticker} &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
+        <a class="sec-link" href="${item.sec_url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>
+      </div>
+      <div class="deep-dive-evidence-text">${item.excerpt}</div>
+    </div>
+  `).join('');
+  const gaps = (comparison.gaps || []).map(gap => `<li>${gap}</li>`).join('');
+
+  return `
+    <article class="deep-dive-card ${statusClass}">
+      <div class="deep-dive-header">
+        <div>
+          <div class="deep-dive-ticker">${comparison.ticker}</div>
+          <div class="deep-dive-name">${comparison.company_name}</div>
+        </div>
+        <span class="deep-dive-status">${statusLabel}</span>
+      </div>
+      <p class="deep-dive-summary">${comparison.summary || ''}</p>
+      ${evidence ? `<div class="deep-dive-evidence-list">${evidence}</div>` : ''}
+      ${gaps ? `<ul class="deep-dive-gaps">${gaps}</ul>` : ''}
+    </article>
+  `;
+}
+
+function renderCompareChart(stockSeries, filingEvents) {
+  if (state.compareChart) {
+    state.compareChart.destroy();
+    state.compareChart = null;
+  }
+  const canvas = $('compare-stock-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const colors = ['#2563eb', '#d97706'];
+  const lineDatasets = stockSeries.map((series, idx) => ({
+    type: 'line',
+    label: `${series.ticker} indexed`,
+    borderColor: colors[idx % colors.length],
+    backgroundColor: colors[idx % colors.length],
+    borderWidth: 2,
+    tension: 0.15,
+    pointRadius: 0,
+    data: (series.points || []).map(point => ({ x: point.date, y: point.indexed_close })),
+  }));
+
+  const markerDatasets = stockSeries.map((series, idx) => {
+    const pointMap = new Map((series.points || []).map(point => [point.date, point.indexed_close]));
+    const points = (filingEvents || [])
+      .map((event, eventIndex) => ({ event, eventIndex }))
+      .filter(({ event }) => event.ticker === series.ticker && event.trading_date && pointMap.has(event.trading_date))
+      .map(({ event, eventIndex }) => ({
+        x: event.trading_date,
+        y: pointMap.get(event.trading_date),
+        eventIndex,
+        label: `${event.ticker} ${event.form_type}`,
+      }));
+
+    return {
+      type: 'scatter',
+      label: `${series.ticker} filings`,
+      borderColor: colors[idx % colors.length],
+      backgroundColor: colors[idx % colors.length],
+      pointStyle: 'triangle',
+      pointRadius: 6,
+      pointHoverRadius: 7,
+      data: points,
+      compareEventDataset: true,
+    };
+  });
+
+  state.compareChart = new Chart(canvas.getContext('2d'), {
+    data: {
+      datasets: [...lineDatasets, ...markerDatasets],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      scales: {
+        x: {
+          type: 'category',
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Indexed Close (Start = 100)',
+          },
+        },
+      },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            label(context) {
+              const raw = context.raw || {};
+              if (raw.label) return `${raw.label}: ${context.formattedValue}`;
+              return `${context.dataset.label}: ${context.formattedValue}`;
+            },
+          },
+        },
+      },
+      onClick(_event, elements, chart) {
+        if (!elements.length) return;
+        const element = elements[0];
+        const dataset = chart.data.datasets[element.datasetIndex];
+        if (!dataset.compareEventDataset) return;
+        const point = dataset.data[element.index];
+        if (point && Number.isInteger(point.eventIndex)) {
+          const eventRecord = (state.compare?.filing_events || [])[point.eventIndex];
+          if (eventRecord) showCompareEventDetail(compareEventId(eventRecord));
+        }
+      },
+    },
+  });
+}
+
+function showCompareEventDetail(eventId) {
+  const events = state.compare?.filing_events || [];
+  const event = events.find(item => compareEventId(item) === eventId);
+  if (!event) return;
+
+  const detail = $('compare-event-detail');
+  const excerpts = (event.supporting_excerpts || []).map(item => `
+    <div class="deep-dive-evidence-item">
+      <div class="deep-dive-evidence-meta">
+        ${event.ticker} &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
+        <a class="sec-link" href="${item.sec_url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>
+      </div>
+      <div class="deep-dive-evidence-text">${item.excerpt}</div>
+    </div>
+  `).join('');
+
+  detail.innerHTML = `
+    <div class="compare-event-detail-header">
+      <div>
+        <div class="deep-dive-ticker">${event.ticker}</div>
+        <div class="compare-event-meta">${event.form_type} filed ${event.filing_date}${event.trading_date ? ` • trading day ${event.trading_date}` : ''}</div>
+      </div>
+      <a class="sec-link" href="${event.sec_url}" target="_blank" rel="noopener noreferrer">View filing</a>
+    </div>
+    <div class="compare-return-strip">
+      <span>+1D ${formatPercent(event.return_1d)}</span>
+      <span>+5D ${formatPercent(event.return_5d)}</span>
+      <span>+30D ${formatPercent(event.return_30d)}</span>
+    </div>
+    ${event.acceptance_datetime ? `<div class="compare-acceptance-time">Accepted: ${event.acceptance_datetime}</div>` : ''}
+    ${excerpts ? `<div class="deep-dive-evidence-list">${excerpts}</div>` : '<p class="compare-empty-note">No compare excerpts from this filing were selected for the strategy summary.</p>'}
+  `;
+  show('compare-event-detail');
+}
+
+/* ═══════════════════════════════════════════
    CLAIM VERIFICATION
    ═══════════════════════════════════════════ */
 async function submitVerdict(claimId, verdict, btn) {
@@ -766,8 +1083,14 @@ async function clearData() {
       if (data.cleared.includes('vectors') || data.cleared.includes('sessions')) {
         state.proposalId = null;
         state.answer = null;
+        state.compare = null;
+        if (state.compareChart) {
+          state.compareChart.destroy();
+          state.compareChart = null;
+        }
         hide('ingestion-panel');
         hide('answer-panel');
+        hide('compare-results-panel');
         hide('scope-panel');
       }
     }
@@ -791,6 +1114,12 @@ async function clearData() {
   $('manual-date-start').value = start;
   $('manual-date-end').value   = end;
   state.manualDateRange = [start, end];
+
+  const compareEnd = today();
+  const compareStart = yearsAgo(2);
+  $('compare-date-start').value = compareStart;
+  $('compare-date-end').value = compareEnd;
+  state.compareDateRange = [compareStart, compareEnd];
 })();
 
 /* ── Keyboard shortcuts ── */

@@ -159,3 +159,73 @@ class Chunk(BaseModel):
     chunk_id: str
     text: str
     metadata: ChunkMetadata
+
+
+class CompareRequest(BaseModel):
+    ticker_a: str
+    ticker_b: str
+    query: str
+    form_types: list[str]
+    filing_date_range: list[str]
+    price_lookback: str = "3M"
+
+
+class StockPricePoint(BaseModel):
+    date: str
+    close: float
+    indexed_close: float
+
+
+class StockSeries(BaseModel):
+    ticker: str
+    company_name: str
+    points: list[StockPricePoint] = Field(default_factory=list)
+
+
+class CompareEvidenceItem(BaseModel):
+    chunk_id: str
+    excerpt: str
+    accession_number: str
+    cik: str
+    form_type: str
+    filing_date: str
+    item_section: str
+    sec_url: str
+
+
+class CompanyComparison(BaseModel):
+    ticker: str
+    company_name: str
+    status: str
+    summary: str
+    evidence: list[CompareEvidenceItem] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
+class FilingEvent(BaseModel):
+    ticker: str
+    company_name: str
+    accession_number: str
+    cik: str
+    form_type: str
+    filing_date: str
+    acceptance_datetime: Optional[str] = None
+    trading_date: Optional[str] = None
+    sec_url: str
+    return_1d: Optional[float] = None
+    return_5d: Optional[float] = None
+    return_30d: Optional[float] = None
+    supporting_chunk_ids: list[str] = Field(default_factory=list)
+    supporting_excerpts: list[CompareEvidenceItem] = Field(default_factory=list)
+
+
+class CompareResponse(BaseModel):
+    compare_run_id: str
+    from_cache: bool = False
+    companies: list[Company]
+    overall_summary: str
+    company_comparisons: list[CompanyComparison] = Field(default_factory=list)
+    similarities: list[str] = Field(default_factory=list)
+    differences: list[str] = Field(default_factory=list)
+    stock_series: list[StockSeries] = Field(default_factory=list)
+    filing_events: list[FilingEvent] = Field(default_factory=list)

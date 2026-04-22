@@ -112,6 +112,138 @@
         </div>
       </section>
 
+      <!-- ═══ COMPARE COMPANIES ═══ -->
+      <section id="compare-entry-panel" class="card compare-feature-card">
+        <div class="panel-header">
+          <h2>Compare Companies</h2>
+          <span class="badge badge-blue">Independent Workflow</span>
+        </div>
+        <p class="panel-desc">Compare two companies using recent SEC filing language plus stock behavior around filing dates. This workflow is separate from the research-answer flow above.</p>
+
+        <div class="compare-grid">
+          <div class="compare-field">
+            <label class="field-label">Company A</label>
+            <input type="text" id="compare-ticker-a" placeholder="e.g. KO" />
+          </div>
+          <div class="compare-field">
+            <label class="field-label">Company B</label>
+            <input type="text" id="compare-ticker-b" placeholder="e.g. PEP" />
+          </div>
+        </div>
+
+        <div class="compare-field">
+          <label class="field-label">Comparison Question</label>
+          <textarea id="compare-query-input" rows="2" placeholder="e.g. How do these two companies describe growth strategy and margin expansion?"></textarea>
+        </div>
+
+        <div class="compare-meta-grid">
+          <div class="compare-field">
+            <label class="field-label">Filing Types</label>
+            <div class="form-type-chips" id="compare-form-types">
+              <span class="chip active" data-type="10-K" onclick="toggleCompareForm(this)">10-K</span>
+              <span class="chip active" data-type="10-Q" onclick="toggleCompareForm(this)">10-Q</span>
+              <span class="chip active" data-type="8-K" onclick="toggleCompareForm(this)">8-K</span>
+              <span class="chip active" data-type="20-F" onclick="toggleCompareForm(this)">20-F</span>
+              <span class="chip active" data-type="6-K" onclick="toggleCompareForm(this)">6-K</span>
+            </div>
+          </div>
+          <div class="compare-field">
+            <label class="field-label">Filing Time Frame</label>
+            <div class="time-preset-row" id="compare-time-presets">
+              <button class="time-preset-btn" onclick="setCompareTimePreset(1)">1Y</button>
+              <button class="time-preset-btn active" onclick="setCompareTimePreset(2)">2Y</button>
+              <button class="time-preset-btn" onclick="setCompareTimePreset(3)">3Y</button>
+              <button class="time-preset-btn" onclick="setCompareTimePreset('custom')">Custom</button>
+            </div>
+            <div class="date-range-row" style="margin-top:6px">
+              <input type="date" id="compare-date-start" />
+              <span>to</span>
+              <input type="date" id="compare-date-end" />
+            </div>
+          </div>
+          <div class="compare-field">
+            <label class="field-label">Stock Lookback</label>
+            <div class="time-preset-row" id="compare-lookback-presets">
+              <button class="time-preset-btn" onclick="setCompareLookback('1M')">1M</button>
+              <button class="time-preset-btn active" onclick="setCompareLookback('3M')">3M</button>
+              <button class="time-preset-btn" onclick="setCompareLookback('6M')">6M</button>
+              <button class="time-preset-btn" onclick="setCompareLookback('1Y')">1Y</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="manual-actions">
+          <button class="btn btn-primary" onclick="runCompare(false)">Compare Companies</button>
+          <button class="btn btn-ghost btn-sm" onclick="runCompare(true)" title="Ignore compare cache and re-run">&#8635; Refresh Compare</button>
+          <span id="compare-status" class="status-text"></span>
+        </div>
+      </section>
+
+      <section id="compare-results-panel" class="card hidden">
+        <div class="panel-header">
+          <h2>Company Comparison</h2>
+          <span class="badge badge-green">SEC + Stock Context</span>
+          <span id="compare-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+        </div>
+        <div id="compare-loading" class="loading-area hidden">
+          <div class="spinner"></div>
+          <p>Fetching filings, building comparison, and loading daily price history&hellip;</p>
+        </div>
+        <div id="compare-summary-section" class="hidden">
+          <h3>Overall Comparison</h3>
+          <div class="overall-answer-card">
+            <p id="compare-overall-summary" class="overall-answer-summary"></p>
+            <div class="compare-bullet-columns">
+              <div>
+                <div class="compare-subtitle">Similarities</div>
+                <ul id="compare-similarities" class="overall-answer-points"></ul>
+              </div>
+              <div>
+                <div class="compare-subtitle">Differences</div>
+                <ul id="compare-differences" class="overall-answer-points"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="compare-company-section" class="hidden">
+          <div class="panel-header">
+            <h3>Side-by-Side Strategy Comparison</h3>
+            <span class="badge badge-blue">Filing-Backed</span>
+          </div>
+          <div id="compare-company-list" class="company-deep-dives-list compare-company-list"></div>
+        </div>
+        <div id="compare-chart-section" class="hidden">
+          <div class="panel-header">
+            <h3>Stock Performance Around Filings</h3>
+            <span class="badge badge-yellow">Daily Prices</span>
+          </div>
+          <p class="compare-chart-note">The chart shows indexed performance and filing markers. Price moves are shown around filing dates and should not be treated as proof that a filing caused the move.</p>
+          <div class="compare-chart-shell">
+            <canvas id="compare-stock-chart"></canvas>
+          </div>
+        </div>
+        <div id="compare-events-section" class="hidden">
+          <h3>Filing Events</h3>
+          <div class="compare-events-table-wrap">
+            <table class="compare-events-table">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Form</th>
+                  <th>Filed</th>
+                  <th>Trading Day</th>
+                  <th>+1D</th>
+                  <th>+5D</th>
+                  <th>+30D</th>
+                </tr>
+              </thead>
+              <tbody id="compare-events-body"></tbody>
+            </table>
+          </div>
+          <div id="compare-event-detail" class="compare-event-detail hidden"></div>
+        </div>
+      </section>
+
       <!-- ═══ SCOPE PROPOSAL (AI tab only) ═══ -->
       <section id="scope-panel" class="card hidden">
         <div class="panel-header">
@@ -268,6 +400,7 @@
     </aside>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ import shutil
 import chromadb
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from config import CHROMA_DIR, FILINGS_CACHE_DIR, LOGS_DIR, DATA_DIR
+from config import CHROMA_DIR, FILINGS_CACHE_DIR, LOGS_DIR, DATA_DIR, COMPARE_STATE_DIR
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -32,6 +32,14 @@ def _file_count(path: str) -> int:
     return sum(len(files) for _, _, files in os.walk(path))
 
 
+def _paths_size_mb(paths: list[str]) -> float:
+    return round(sum(_dir_size_mb(path) for path in paths), 2)
+
+
+def _paths_file_count(paths: list[str]) -> int:
+    return sum(_file_count(path) for path in paths)
+
+
 @router.get("/status")
 async def data_status():
     """Return sizes and file counts for each data store."""
@@ -47,9 +55,9 @@ async def data_status():
             "files": _file_count(FILINGS_CACHE_DIR),
         },
         "sessions": {
-            "label": "Scope & answer sessions",
-            "size_mb": _dir_size_mb(_STATE_DIR),
-            "files": _file_count(_STATE_DIR),
+            "label": "Scope, answer & compare sessions",
+            "size_mb": _paths_size_mb([_STATE_DIR, COMPARE_STATE_DIR]),
+            "files": _paths_file_count([_STATE_DIR, COMPARE_STATE_DIR]),
         },
         "logs": {
             "label": "Event logs",
@@ -86,6 +94,8 @@ async def clear_data(req: ClearRequest):
             elif target == "sessions":
                 shutil.rmtree(_STATE_DIR, ignore_errors=True)
                 os.makedirs(_STATE_DIR, exist_ok=True)
+                shutil.rmtree(COMPARE_STATE_DIR, ignore_errors=True)
+                os.makedirs(COMPARE_STATE_DIR, exist_ok=True)
                 cleared.append("sessions")
 
             elif target == "logs":

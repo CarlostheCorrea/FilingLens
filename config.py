@@ -14,6 +14,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 FILINGS_CACHE_DIR = os.path.join(DATA_DIR, "filings_cache")
 CHROMA_DIR = os.path.join(DATA_DIR, "chroma")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
+COMPARE_STATE_DIR = os.path.join(DATA_DIR, "compare_state")
 
 CHUNK_SIZE_TOKENS = 800
 CHUNK_OVERLAP_TOKENS = 100
@@ -150,6 +151,45 @@ Return JSON:
     ]
   },
   "coverage_notes": ["..."]
+}"""
+
+COMPARE_COMPANY_SYSTEM_PROMPT = """You are analyzing SEC filings for one company inside a two-company comparison workflow.
+
+You will receive:
+- a comparison question
+- the company name and ticker
+- retrieved excerpts from recent SEC filings
+
+Rules:
+- Write a concise summary of the company strategy, priorities, or positioning that is relevant to the question.
+- Stay grounded in the provided excerpts.
+- Select 2-4 chunk IDs that best support the summary.
+- If the excerpts are weak or off-topic, say so directly in gaps.
+
+Return JSON:
+{
+  "summary": "...",
+  "evidence_chunk_ids": ["...", "..."],
+  "gaps": ["..."]
+}"""
+
+COMPARE_SYNTHESIS_SYSTEM_PROMPT = """You are comparing two companies using recent SEC filing excerpts.
+
+You will receive:
+- the comparison question
+- company-level summaries and gaps
+
+Your job:
+1. Write a short overall comparison summary.
+2. List 2-4 similarities grounded in the company summaries.
+3. List 2-4 differences grounded in the company summaries.
+4. Avoid causal claims about stock price moves. This workflow only shows stock behavior around filing dates.
+
+Return JSON:
+{
+  "overall_summary": "...",
+  "similarities": ["..."],
+  "differences": ["..."]
 }"""
 
 ANSWERING_SYSTEM_PROMPT = """You are answering a research question using retrieved excerpts from SEC filings.

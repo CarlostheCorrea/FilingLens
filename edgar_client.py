@@ -148,6 +148,7 @@ def list_filings(
                 "accession_number": _safe_str(getattr(f, "accession_no", "")),
                 "form_type": _safe_str(getattr(f, "form", "")),
                 "filing_date": date_str,
+                "acceptance_datetime": _filing_acceptance_datetime(f),
                 "company_name": _safe_str(getattr(company, "name", "")),
                 "cik": cik,
                 "ticker": tickers[0] if tickers else "",
@@ -178,6 +179,7 @@ def fetch_filing_text(accession_number: str, cik: str | None = None) -> dict:
             "accession_number": accession_number,
             "form_type": _safe_str(getattr(filing, "form", "")),
             "filing_date": _safe_str(getattr(filing, "filing_date", "")),
+            "acceptance_datetime": _filing_acceptance_datetime(filing),
         }
 
         sections = _extract_sections(filing)
@@ -289,6 +291,14 @@ def _extract_sections(filing) -> dict:
             pass
 
     return sections
+
+
+def _filing_acceptance_datetime(filing) -> str:
+    for attr in ("acceptance_datetime", "accepted", "accepted_datetime", "filing_datetime"):
+        value = getattr(filing, attr, None)
+        if value:
+            return _safe_str(value)
+    return ""
 
 
 def _parse_sections_from_text(text: str, target_items: dict) -> dict:

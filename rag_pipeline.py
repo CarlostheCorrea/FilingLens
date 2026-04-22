@@ -19,10 +19,13 @@ os.makedirs(CHROMA_DIR, exist_ok=True)
 _enc = tiktoken.get_encoding("cl100k_base")
 _openai = OpenAI(api_key=OPENAI_API_KEY)
 _chroma = chromadb.PersistentClient(path=CHROMA_DIR)
-_collection = _chroma.get_or_create_collection(
-    name="sec_filings",
-    metadata={"hnsw:space": "cosine"},
-)
+
+
+def _get_collection(collection_name: str = "sec_filings"):
+    return _chroma.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
 
 
 def _tokenize(text: str) -> list[int]:
@@ -84,9 +87,11 @@ def chunk_filing(filing_text_dict: dict) -> list[Chunk]:
     return chunks
 
 
-def embed_chunks(chunks: list[Chunk]) -> None:
+def embed_chunks(chunks: list[Chunk], collection_name: str = "sec_filings") -> None:
     if not chunks:
         return
+
+    collection = _get_collection(collection_name)
 
     batch_size = 100
     for i in range(0, len(chunks), batch_size):
@@ -99,7 +104,7 @@ def embed_chunks(chunks: list[Chunk]) -> None:
         )
         vectors = [item.embedding for item in response.data]
 
-        _collection.upsert(
+        collection.upsert(
             ids=[c.chunk_id for c in batch],
             embeddings=vectors,
             documents=texts,
@@ -129,9 +134,9 @@ def _build_where(filters: dict | None, tickers: list[str] | None) -> dict | None
     return {"$and": conditions}
 
 
-def _collection_count() -> int:
+def _collection_count(collection_name: str = "sec_filings") -> int:
     try:
-        return _collection.count()
+        return _get_collection(collection_name).count()
     except Exception:
         return 0
 
@@ -141,10 +146,13 @@ def retrieve(
     k: int = RETRIEVAL_K,
     filters: dict | None = None,
     tickers: list[str] | None = None,
+    collection_name: str = "sec_filings",
 ) -> list[Chunk]:
-    total = _collection_count()
+    total = _collection_count(collection_name)
     if total == 0:
         return []
+
+    collection = _get_collection(collection_name)
 
     response = _openai.embeddings.create(
         model=OPENAI_EMBEDDING_MODEL,
@@ -156,7 +164,7 @@ def retrieve(
     safe_k = min(k, total)
 
     try:
-        results = _collection.query(
+        results = collection.query(
             query_embeddings=[query_vec],
             n_results=safe_k,
             where=where,
@@ -164,7 +172,7 @@ def retrieve(
         )
     except Exception:
         # Fallback: drop the filter and try unscoped
-        results = _collection.query(
+        results = collection.query(
             query_embeddings=[query_vec],
             n_results=safe_k,
             include=["documents", "metadatas"],
@@ -186,9 +194,9 @@ def retrieve(
     return chunks
 
 
-def get_chunk_by_id(chunk_id: str) -> Chunk | None:
+def get_chunk_by_id(chunk_id: str, collection_name: str = "sec_filings") -> Chunk | None:
     try:
-        result = _collection.get(ids=[chunk_id], include=["documents", "metadatas"])
+        result = _get_collection(collection_name).get(ids=[chunk_id], include=["documents", "metadatas"])
         docs = result.get("documents", [])
         metas = result.get("metadatas", [])
         if docs and metas:
