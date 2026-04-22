@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FilingLens — SEC Filing Intelligence</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div>
+        <h1>FilingLens</h1>
+        <p class="header-sub">RAG &middot; MCP &middot; Human-in-the-Loop &middot; SEC EDGAR</p>
+      </div>
+      <div class="header-badge">GPT-4o</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="main-column">
+
+      <!-- ═══ TABBED ENTRY PANEL ═══ -->
+      <section class="card" id="entry-panel">
+        <div class="tab-nav">
+          <button class="tab-btn active" id="tab-btn-ai" onclick="switchTab('ai')">
+            &#129504; AI Research
+          </button>
+          <button class="tab-btn" id="tab-btn-manual" onclick="switchTab('manual')">
+            &#128203; Manual Selection
+          </button>
+        </div>
+
+        <!-- ── Tab 1: AI Research ── -->
+        <div id="tab-ai" class="tab-content">
+          <p class="panel-desc">Describe what you want to research — the AI will propose which companies and filings to analyze.</p>
+          <textarea
+            id="query-input"
+            rows="3"
+            placeholder='e.g. "Which semiconductor companies flagged supply chain risk in their most recent 10-K?"'
+          ></textarea>
+          <div class="query-actions">
+            <button id="propose-btn" class="btn btn-primary" onclick="proposeScope()">Propose Scope</button>
+            <div id="query-status" class="status-text"></div>
+          </div>
+          <p class="tab-hint">&#8984;+Enter to propose &nbsp;&bull;&nbsp; AI picks companies via MCP &rarr; you review &rarr; ingest</p>
+        </div>
+
+        <!-- ── Tab 2: Manual Selection ── -->
+        <div id="tab-manual" class="tab-content hidden">
+          <p class="panel-desc">Enter tickers directly, pick filing types and a time frame — no AI needed.</p>
+
+          <!-- Ticker input -->
+          <div class="manual-section">
+            <label class="field-label">Add Tickers</label>
+            <div class="manual-ticker-row">
+              <input type="text" id="manual-ticker-input" placeholder="e.g. NVDA, AMD, TSLA" onkeydown="if(event.key==='Enter')addManualTickers()" />
+              <button class="btn btn-primary btn-sm" onclick="addManualTickers()">+ Add</button>
+            </div>
+            <p class="field-hint">Separate multiple tickers with commas or spaces</p>
+          </div>
+
+          <!-- Quick presets -->
+          <div class="manual-section">
+            <label class="field-label">Quick Presets</label>
+            <div class="preset-row">
+              <button class="preset-btn" onclick="addPreset('semis')">&#127758; Semiconductors</button>
+              <button class="preset-btn" onclick="addPreset('bigtech')">&#128187; Big Tech</button>
+              <button class="preset-btn" onclick="addPreset('ev')">&#9889; EV Makers</button>
+              <button class="preset-btn" onclick="addPreset('banks')">&#127970; Big Banks</button>
+              <button class="btn-clear-all" onclick="clearManualTickers()">Clear all</button>
+            </div>
+          </div>
+
+          <!-- Ticker chips -->
+          <div id="manual-ticker-chips" class="manual-ticker-chips hidden"></div>
+
+          <!-- Form types -->
+          <div class="manual-section manual-row-2">
+            <div>
+              <label class="field-label">Filing Types</label>
+              <div class="form-type-chips" id="manual-form-types">
+                <span class="chip active" data-type="10-K" onclick="toggleManualForm(this)">10-K</span>
+                <span class="chip active" data-type="10-Q" onclick="toggleManualForm(this)">10-Q</span>
+                <span class="chip" data-type="8-K" onclick="toggleManualForm(this)">8-K</span>
+              </div>
+            </div>
+            <div>
+              <label class="field-label">Time Frame</label>
+              <div class="time-preset-row">
+                <button class="time-preset-btn" onclick="setTimePreset(1, 'manual')">1Y</button>
+                <button class="time-preset-btn" onclick="setTimePreset(2, 'manual')">2Y</button>
+                <button class="time-preset-btn active" onclick="setTimePreset(3, 'manual')">3Y</button>
+                <button class="time-preset-btn" onclick="setTimePreset('custom', 'manual')">Custom</button>
+              </div>
+              <div class="date-range-row" id="manual-date-row">
+                <input type="date" id="manual-date-start" />
+                <span>to</span>
+                <input type="date" id="manual-date-end" />
+              </div>
+            </div>
+          </div>
+
+          <div class="manual-actions">
+            <button class="btn btn-primary" id="manual-ingest-btn" onclick="startManualIngest()">
+              Ingest Filings
+            </button>
+            <span id="manual-status" class="status-text"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ SCOPE PROPOSAL (AI tab only) ═══ -->
+      <section id="scope-panel" class="card hidden">
+        <div class="panel-header">
+          <h2>Scope Proposal</h2>
+          <span class="badge badge-blue">Checkpoint 1 &mdash; Review &amp; Edit</span>
+        </div>
+        <p class="panel-desc" id="scope-rationale"></p>
+
+        <div class="scope-meta">
+          <div class="meta-group">
+            <label>Filing Types</label>
+            <div id="form-types-editor"></div>
+          </div>
+          <div class="meta-group">
+            <label>Time Frame</label>
+            <div class="time-preset-row">
+              <button class="time-preset-btn" onclick="setTimePreset(1,'scope')">1Y</button>
+              <button class="time-preset-btn" onclick="setTimePreset(2,'scope')">2Y</button>
+              <button class="time-preset-btn" onclick="setTimePreset(3,'scope')">3Y</button>
+              <button class="time-preset-btn" onclick="setTimePreset('custom','scope')">Custom</button>
+            </div>
+            <div class="date-range-row" style="margin-top:6px">
+              <input type="date" id="date-start" />
+              <span>to</span>
+              <input type="date" id="date-end" />
+            </div>
+          </div>
+        </div>
+
+        <div class="companies-section">
+          <div class="companies-header">
+            <h3>Companies (<span id="company-count">0</span>)</h3>
+            <div class="add-company-row">
+              <input type="text" id="add-ticker-input" placeholder="Add ticker (e.g. NVDA)" onkeydown="if(event.key==='Enter')addCompany()" />
+              <button class="btn btn-sm" onclick="addCompany()">+ Add</button>
+            </div>
+          </div>
+          <div id="company-list" class="company-grid"></div>
+        </div>
+
+        <div class="scope-actions">
+          <button class="btn btn-primary" onclick="approveScope()">Approve &amp; Ingest Filings</button>
+          <button class="btn btn-ghost" onclick="rejectScope()">Reject &amp; Start Over</button>
+        </div>
+      </section>
+
+      <!-- ═══ INGESTION PANEL ═══ -->
+      <section id="ingestion-panel" class="card hidden">
+        <div class="panel-header">
+          <h2>Live Ingestion</h2>
+          <span class="badge badge-yellow" id="ingestion-badge">Running</span>
+        </div>
+        <div id="ingestion-progress" class="progress-area">
+          <div class="spinner"></div>
+          <p id="ingestion-status-text">Fetching filings from SEC EDGAR&hellip;</p>
+        </div>
+        <div id="ingestion-results" class="hidden">
+          <div class="ingestion-stats" id="ingestion-stats"></div>
+          <div id="filing-list" class="filing-list"></div>
+          <div id="ingestion-errors" class="error-list hidden"></div>
+        </div>
+
+        <div id="ask-question-area" class="hidden">
+          <div class="ask-header">
+            <h3>Ask a Research Question</h3>
+            <div id="scope-ticker-chips" class="scope-chips"></div>
+          </div>
+          <div id="history-section" class="hidden">
+            <div class="history-label">Past questions &mdash; click to re-use instantly</div>
+            <div id="history-list" class="history-list"></div>
+          </div>
+          <div class="ask-input-row">
+            <textarea id="answer-query-input" rows="2" placeholder="Enter your research question&hellip;"></textarea>
+          </div>
+          <div class="ask-actions">
+            <button class="btn btn-primary" onclick="generateAnswer(false)">Generate Answer</button>
+            <button class="btn btn-ghost btn-sm" onclick="generateAnswer(true)" title="Ignore cache and re-run">&#8635; Refresh</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ ANSWER PANEL ═══ -->
+      <section id="answer-panel" class="card hidden">
+        <div class="panel-header">
+          <h2>Research Answer</h2>
+          <span class="badge badge-green">Citation-Backed</span>
+          <span id="cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+          <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="generateAnswer(true)">&#8635; Re-run</button>
+        </div>
+        <div id="answer-loading" class="loading-area hidden">
+          <div class="spinner"></div>
+          <p>Retrieving relevant chunks and generating answer&hellip;</p>
+        </div>
+        <div id="gaps-section" class="hidden">
+          <h3 class="gaps-title">Coverage Gaps</h3>
+          <ul id="gaps-list" class="gaps-list"></ul>
+        </div>
+        <div id="claims-section" class="hidden">
+          <div class="panel-header">
+            <h3>Claims</h3>
+            <span class="badge badge-blue">Checkpoint 2 &mdash; Verify Each Claim</span>
+          </div>
+          <div id="claims-list"></div>
+        </div>
+      </section>
+
+    </section>
+
+    <!-- ═══ ACTIVITY SIDEBAR ═══ -->
+    <aside id="activity-sidebar">
+      <div class="sidebar-header">
+        <h3>Activity Log</h3>
+        <button class="btn btn-sm btn-ghost" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="activity-log"></div>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
