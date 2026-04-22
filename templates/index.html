@@ -225,6 +225,28 @@
         <button class="btn btn-sm btn-ghost" onclick="clearLog()">Clear</button>
       </div>
       <div id="activity-log"></div>
+
+      <!-- Data Management -->
+      <div class="data-mgmt-panel">
+        <div class="data-mgmt-header" onclick="toggleDataPanel()">
+          <span>&#128465; Data Storage</span>
+          <span id="data-mgmt-chevron">&#9660;</span>
+        </div>
+        <div id="data-mgmt-body" class="hidden">
+          <div id="data-status-rows"></div>
+          <div class="data-checkboxes">
+            <label class="data-check"><input type="checkbox" id="clear-vectors" checked /> ChromaDB vectors</label>
+            <label class="data-check"><input type="checkbox" id="clear-cache" checked /> Filing text cache</label>
+            <label class="data-check"><input type="checkbox" id="clear-sessions" /> Sessions &amp; history</label>
+            <label class="data-check"><input type="checkbox" id="clear-logs" /> Event logs</label>
+          </div>
+          <div class="data-actions">
+            <button class="btn btn-sm btn-ghost" onclick="loadDataStatus()">&#8635; Refresh</button>
+            <button class="btn btn-sm btn-danger" onclick="clearData()">Clear Selected</button>
+          </div>
+          <p id="clear-result" class="clear-result"></p>
+        </div>
+      </div>
     </aside>
   </main>
 

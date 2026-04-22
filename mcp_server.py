@@ -61,6 +61,7 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "accession_number": {"type": "string"},
+                    "cik": {"type": "string", "description": "Company CIK (optional but improves reliability when filing agent submitted)"},
                 },
                 "required": ["accession_number"],
             },
@@ -118,7 +119,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 until_date=arguments["until_date"],
             )
         elif name == "fetch_filing":
-            result = edgar_client.fetch_filing_text(arguments["accession_number"])
+            result = edgar_client.fetch_filing_text(
+                arguments["accession_number"],
+                cik=arguments.get("cik"),
+            )
         elif name == "fetch_filing_section":
             filing = edgar_client.fetch_filing_text(arguments["accession_number"])
             section = arguments["section_name"]

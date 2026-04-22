@@ -102,8 +102,11 @@ class MCPClient:
         })
         return result if isinstance(result, list) else []
 
-    async def fetch_filing(self, accession_number: str) -> dict:
-        return await self.call_tool("fetch_filing", {"accession_number": accession_number})
+    async def fetch_filing(self, accession_number: str, cik: str | None = None) -> dict:
+        args = {"accession_number": accession_number}
+        if cik:
+            args["cik"] = cik
+        return await self.call_tool("fetch_filing", args)
 
     async def resolve_ticker_to_cik(self, ticker: str) -> dict:
         result = await self.call_tool("resolve_ticker_to_cik", {"ticker": ticker})

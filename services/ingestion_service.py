@@ -46,7 +46,7 @@ async def ingest(proposal_id: str) -> dict:
                 continue
 
             try:
-                filing_text = await mcp.fetch_filing(accession)
+                filing_text = await mcp.fetch_filing(accession, cik=cik)
 
                 if filing_text.get("error"):
                     errors.append(f"{accession}: {filing_text['error']}")

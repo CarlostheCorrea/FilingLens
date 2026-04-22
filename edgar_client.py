@@ -121,14 +121,14 @@ def list_filings(
         return []
 
 
-def fetch_filing_text(accession_number: str) -> dict:
+def fetch_filing_text(accession_number: str, cik: str | None = None) -> dict:
     cache_path = os.path.join(FILINGS_CACHE_DIR, f"{accession_number.replace('/', '_')}.json")
     if os.path.exists(cache_path):
         with open(cache_path) as f:
             return json.load(f)
 
     try:
-        filing, company = _get_filing_by_accession(accession_number)
+        filing, company = _get_filing_by_accession(accession_number, cik=cik)
         if filing is None:
             return {"error": f"Filing not found: {accession_number}", "accession_number": accession_number, "metadata": {}, "sections": {}}
 
@@ -154,13 +154,15 @@ def fetch_filing_text(accession_number: str) -> dict:
         return {"error": str(e), "accession_number": accession_number, "metadata": {}, "sections": {}}
 
 
-def _get_filing_by_accession(accession_number: str):
+def _get_filing_by_accession(accession_number: str, cik: str | None = None):
     """
     Resolve a filing object by accession number.
-    edgartools has no get_filing() function — we parse the CIK from the
-    accession number (first 10 digits) and search the company's filings.
-    Accession number format: XXXXXXXXXX-YY-ZZZZZZ
+    Prefer the supplied CIK (from the company that owns the filing) over
+    parsing it from the accession prefix — filing agents submit on behalf of
+    companies, so the prefix CIK is often the agent's, not the company's.
     """
+    normalized_target = accession_number.replace("-", "").replace("/", "").lower()
+
     # Try direct Filing class first (some edgartools versions expose it)
     try:
         from edgar import Filing
@@ -172,21 +174,32 @@ def _get_filing_by_accession(accession_number: str):
     except Exception:
         pass
 
-    # Parse CIK from the accession number prefix
+    def _search_company_filings(cik_str: str):
+        try:
+            cik_clean = str(int(cik_str))
+            company = edgar.Company(cik_clean)
+            filings = company.get_filings()
+            for f in filings:
+                acc = _safe_str(getattr(f, "accession_no", ""))
+                if acc.replace("-", "").lower() == normalized_target:
+                    return f, company
+        except Exception:
+            pass
+        return None, None
+
+    # 1. Use the provided company CIK (most reliable)
+    if cik:
+        filing, company = _search_company_filings(cik)
+        if filing is not None:
+            return filing, company
+
+    # 2. Fall back to parsing the CIK from the accession number prefix
     try:
-        parts = accession_number.replace("/", "-").split("-")
-        cik_raw = parts[0]  # e.g. "0001045810"
-        cik = str(int(cik_raw))  # strip leading zeros → "1045810"
-
-        company = edgar.Company(cik)
-        filings = company.get_filings()
-
-        normalized_target = accession_number.replace("-", "").replace("/", "").lower()
-
-        for f in filings:
-            acc = _safe_str(getattr(f, "accession_no", ""))
-            if acc.replace("-", "").lower() == normalized_target:
-                return f, company
+        prefix = accession_number.replace("/", "-").split("-")[0]
+        if prefix != (cik or "").lstrip("0"):
+            filing, company = _search_company_filings(prefix)
+            if filing is not None:
+                return filing, company
     except Exception:
         pass
 

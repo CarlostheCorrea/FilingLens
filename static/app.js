@@ -606,6 +606,92 @@ async function submitVerdict(claimId, verdict, btn) {
   btn.classList.add('active');
 }
 
+/* ═══════════════════════════════════════════
+   DATA MANAGEMENT
+   ═══════════════════════════════════════════ */
+function toggleDataPanel() {
+  const body = $('data-mgmt-body');
+  const chevron = $('data-mgmt-chevron');
+  const isHidden = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !isHidden);
+  chevron.textContent = isHidden ? '▲' : '▼';
+  if (isHidden) loadDataStatus();
+}
+
+async function loadDataStatus() {
+  try {
+    const res = await fetch('/api/data/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    const container = $('data-status-rows');
+    container.innerHTML = Object.values(data).map(d => {
+      const hasData = d.size_mb > 0;
+      return `
+        <div class="data-status-row">
+          <span class="data-status-label">${d.label}</span>
+          <span class="data-status-size ${hasData ? 'has-data' : ''}">
+            ${d.size_mb > 0 ? d.size_mb + ' MB' : 'empty'}
+          </span>
+        </div>
+      `;
+    }).join('');
+  } catch (_) {}
+}
+
+async function clearData() {
+  const targets = [];
+  if ($('clear-vectors').checked)  targets.push('vectors');
+  if ($('clear-cache').checked)    targets.push('cache');
+  if ($('clear-sessions').checked) targets.push('sessions');
+  if ($('clear-logs').checked)     targets.push('logs');
+
+  if (!targets.length) {
+    alert('Select at least one item to clear.');
+    return;
+  }
+
+  const label = targets.join(', ');
+  if (!confirm(`This will permanently delete: ${label}.\n\nYou will need to re-ingest filings before asking questions again. Continue?`)) return;
+
+  const resultEl = $('clear-result');
+  resultEl.textContent = 'Clearing…';
+  resultEl.className = 'clear-result';
+
+  try {
+    const res = await fetch('/api/data/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets }),
+    });
+    const data = await res.json();
+
+    if (data.cleared.length) {
+      resultEl.textContent = `✓ Cleared: ${data.cleared.join(', ')}`;
+      resultEl.className = 'clear-result success';
+      log(`Data cleared: ${data.cleared.join(', ')}`, 'warn');
+
+      // Reset UI state if vectors or sessions were wiped
+      if (data.cleared.includes('vectors') || data.cleared.includes('sessions')) {
+        state.proposalId = null;
+        state.answer = null;
+        hide('ingestion-panel');
+        hide('answer-panel');
+        hide('scope-panel');
+      }
+    }
+    if (data.errors.length) {
+      resultEl.textContent += ` Errors: ${data.errors.join(', ')}`;
+      resultEl.className = 'clear-result error';
+    }
+
+    // Refresh the size display
+    await loadDataStatus();
+  } catch (err) {
+    resultEl.textContent = 'Error: ' + err.message;
+    resultEl.className = 'clear-result error';
+  }
+}
+
 /* ── Init: set default 3Y time frame on manual tab ── */
 (function init() {
   const end   = today();

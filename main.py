@@ -9,6 +9,7 @@ from routes.scope import router as scope_router
 from routes.ingest import router as ingest_router
 from routes.answer import router as answer_router
 from routes.verify import router as verify_router
+from routes.data import router as data_router
 
 app = FastAPI(title="SEC Filing Intelligence Tool", version="1.0.0")
 
@@ -20,6 +21,7 @@ app.include_router(scope_router)
 app.include_router(ingest_router)
 app.include_router(answer_router)
 app.include_router(verify_router)
+app.include_router(data_router)
 
 
 @app.get("/", response_class=HTMLResponse)

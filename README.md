@@ -33,7 +33,7 @@ pip install -r requirements.txt
 ``` bash
 cp .env.example .env
 # Edit .env:
-# OPENAI_API_KEY=sk-...
+# OPENAI_API_KEY=...
 # EDGAR_IDENTITY=Your Name your.email@example.com
 ```
 
