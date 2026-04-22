@@ -2,8 +2,9 @@ import hashlib
 import json
 import os
 
-from agent import generate_answer
-from models import AnswerResponse
+from answer_workflow import run_answer_workflow
+from models import WorkflowAnswerResponse
+from pydantic import ValidationError
 import hitl
 import logging_utils
 import rag_pipeline
@@ -20,47 +21,54 @@ async def answer(
     proposal_id: str,
     query: str,
     force_refresh: bool = False,
-) -> tuple[AnswerResponse, bool]:
+) -> tuple[WorkflowAnswerResponse, bool]:
     """
-    Returns (AnswerResponse, from_cache).
-    Checks cache first; generates fresh answer on miss or force_refresh.
-    Retrieval is scoped to the approved companies for this proposal.
+    Returns (WorkflowAnswerResponse, from_cache).
+    Checks disk cache first; runs the LangGraph supervisor workflow on a miss.
     """
     key = _answer_key(query)
     cache_path = os.path.join(_STATE_DIR, f"{proposal_id}_answer_{key}.json")
 
-    # Return cached answer if available and not forcing refresh
+    # ── Cache hit ─────────────────────────────────────────────────────────────
     if not force_refresh and os.path.exists(cache_path):
-        with open(cache_path) as f:
-            data = json.load(f)
-        return AnswerResponse(**data), True
+        try:
+            with open(cache_path) as f:
+                data = json.load(f)
+            data["from_cache"] = True
+            return WorkflowAnswerResponse(**data), True
+        except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
+            pass
 
-    # Scope retrieval to approved companies
+    # ── Resolve approved companies for this proposal ───────────────────────────
     approved = hitl.load_approved_scope(proposal_id)
-    tickers = (
-        [c.ticker for c in approved.approved_companies if c.ticker]
-        if approved else None
+    companies = (
+        [
+            {"ticker": c.ticker, "name": c.name, "cik": c.cik}
+            for c in approved.approved_companies
+            if c.ticker
+        ]
+        if approved else []
     )
 
-    result = await generate_answer(proposal_id, query, tickers=tickers)
+    # ── Run supervisor workflow ────────────────────────────────────────────────
+    result = await run_answer_workflow(proposal_id, query, companies)
 
-    # Persist to cache
+    # ── Persist cache + history ───────────────────────────────────────────────
     with open(cache_path, "w") as f:
         json.dump(result.model_dump(), f)
 
-    # Also save as "latest" for verification lookup
     hitl.save_answer(proposal_id, result.model_dump(), answer_key="latest")
-
-    # Persist to question history
     hitl.save_question(proposal_id, query, key)
 
-    retrieved_chunks = rag_pipeline.retrieve(query, k=12, tickers=tickers)
+    # ── Analytics log ─────────────────────────────────────────────────────────
+    tickers = [c["ticker"] for c in companies] or None
+    chunks = rag_pipeline.retrieve(query, k=8, tickers=tickers)
     logging_utils.log_answer(
         proposal_id,
         query,
-        [c.model_dump() for c in result.claims],
-        result.gaps,
-        [c.chunk_id for c in retrieved_chunks],
+        [c.model_dump() for c in result.answer.claims_audit.claims],
+        result.answer.coverage_notes,
+        [c.chunk_id for c in chunks],
     )
 
     return result, False

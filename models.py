@@ -49,6 +49,69 @@ class AnswerResponse(BaseModel):
     gaps: list[str]
 
 
+class WorkflowStage(BaseModel):
+    name: str
+    status: str
+    summary: str
+
+
+class WorkflowMetadata(BaseModel):
+    pattern: str = "supervisor"
+    run_id: str
+    status: str = "completed"
+    stages: list[WorkflowStage]
+
+
+class OverallKeyPoint(BaseModel):
+    text: str
+    supporting_tickers: list[str] = Field(default_factory=list)
+
+
+class OverallAnswer(BaseModel):
+    summary: str
+    key_points: list[OverallKeyPoint] = Field(default_factory=list)
+
+
+class CompanyEvidenceItem(BaseModel):
+    chunk_id: str
+    excerpt: str
+    company_ticker: str
+    company_name: str
+    cik: str
+    accession_number: str
+    form_type: str
+    filing_date: str
+    item_section: str
+
+
+class CompanyDeepDive(BaseModel):
+    ticker: str
+    company_name: str
+    status: str
+    summary: str
+    evidence: list[CompanyEvidenceItem] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
+class ClaimsAuditPayload(BaseModel):
+    claims: list[Claim] = Field(default_factory=list)
+
+
+class StructuredAnswerPayload(BaseModel):
+    overall_answer: OverallAnswer
+    company_deep_dives: list[CompanyDeepDive] = Field(default_factory=list)
+    claims_audit: ClaimsAuditPayload
+    coverage_notes: list[str] = Field(default_factory=list)
+
+
+class WorkflowAnswerResponse(BaseModel):
+    proposal_id: str
+    query: str
+    from_cache: bool = False
+    workflow: WorkflowMetadata
+    answer: StructuredAnswerPayload
+
+
 class ClaimVerdict(str, Enum):
     confirmed = "confirmed"
     needs_revision = "needs_revision"

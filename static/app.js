@@ -76,6 +76,15 @@ function switchTab(tab) {
   hide('answer-panel');
 }
 
+function getAnswerPayload(data) {
+  return data.answer || data || {};
+}
+
+function getAuditClaims(data) {
+  const answer = getAnswerPayload(data);
+  return answer.claims_audit?.claims || answer.claims || [];
+}
+
 /* ═══════════════════════════════════════════
    TIME FRAME PRESETS
    ═══════════════════════════════════════════ */
@@ -262,7 +271,7 @@ function renderScopeProposal(data) {
 }
 
 function renderFormTypeChips() {
-  const ALL = ['10-K', '10-Q', '8-K'];
+  const ALL = ['10-K', '10-Q', '8-K', '20-F', '6-K'];
   const container = $('form-types-editor');
   container.innerHTML = '';
   const row = document.createElement('div');
@@ -385,10 +394,11 @@ function renderIngestionResults(data) {
   $('ingestion-badge').textContent = 'Complete';
   $('ingestion-badge').className = 'badge badge-green';
 
+  const issues = data.issues || data.errors || [];
   $('ingestion-stats').innerHTML = `
     <div class="stat-card"><div class="stat-value">${data.filings_ingested ?? 0}</div><div class="stat-label">Filings</div></div>
     <div class="stat-card"><div class="stat-value">${data.chunks_created ?? 0}</div><div class="stat-label">Chunks</div></div>
-    <div class="stat-card"><div class="stat-value">${(data.errors||[]).length}</div><div class="stat-label">Errors</div></div>
+    <div class="stat-card"><div class="stat-value">${issues.length}</div><div class="stat-label">Issues</div></div>
   `;
 
   $('filing-list').innerHTML = (data.filings || []).map(f => {
@@ -408,10 +418,11 @@ function renderIngestionResults(data) {
     `;
   }).join('');
 
-  const errors = data.errors || [];
-  if (errors.length) {
+  if (issues.length) {
     show('ingestion-errors');
-    $('ingestion-errors').innerHTML = errors.map(e => `<div class="error-item">${e}</div>`).join('');
+    $('ingestion-errors').innerHTML = issues.map(e => `<div class="error-item">${e}</div>`).join('');
+  } else {
+    hide('ingestion-errors');
   }
 
   log(`Ingestion complete: ${data.filings_ingested} filings, ${data.chunks_created} chunks`, 'success');
@@ -471,8 +482,10 @@ async function generateAnswer(forceRefresh = false) {
 
   show('answer-panel');
   show('answer-loading');
+  hide('overall-answer-section');
+  hide('company-deep-dives-section');
+  hide('coverage-section');
   hide('claims-section');
-  hide('gaps-section');
   hide('cached-badge');
   $('answer-panel').scrollIntoView({ behavior: 'smooth' });
   log(`Generating answer${forceRefresh ? ' (refresh)' : ''}…`, 'info');
@@ -490,9 +503,20 @@ async function generateAnswer(forceRefresh = false) {
     if (data.from_cache) {
       show('cached-badge');
       log('Answer served from cache ⚡', 'success');
+      // Log cached workflow stages so the activity log still shows them
+      if (data.workflow?.stages) {
+        data.workflow.stages.forEach(s => log(`[${s.name}] ${s.summary}`, 'info'));
+      }
     } else {
       hide('cached-badge');
-      log(`Answer: ${data.claims.length} claims, ${data.gaps.length} gaps`, 'success');
+      const ans = getAnswerPayload(data);
+      const auditClaims = getAuditClaims(data);
+      const deepDives = ans.company_deep_dives || [];
+      log(`Answer: ${auditClaims.length} audit claims, ${deepDives.length} company deep dives`, 'success');
+      // Log each workflow stage to the activity log
+      if (data.workflow?.stages) {
+        data.workflow.stages.forEach(s => log(`[${s.name}] ${s.summary}`, 'info'));
+      }
       loadHistory();
     }
     renderAnswer(data);
@@ -505,19 +529,86 @@ async function generateAnswer(forceRefresh = false) {
 function renderAnswer(data) {
   hide('answer-loading');
 
-  if (data.gaps?.length) {
-    show('gaps-section');
-    $('gaps-list').innerHTML = data.gaps.map(g => `<li>${g}</li>`).join('');
-  } else { hide('gaps-section'); }
+  const ans = getAnswerPayload(data);
+  const overall = ans.overall_answer || {};
+  const keyPoints = overall.key_points || [];
+  const deepDives = ans.company_deep_dives || [];
+  const coverageNotes = ans.coverage_notes || [];
+  const claims = getAuditClaims(data);
+
+  if (overall.summary || keyPoints.length) {
+    show('overall-answer-section');
+    $('overall-answer-summary').textContent = overall.summary || '';
+    $('overall-answer-points').innerHTML = keyPoints.map(point => {
+      const tickers = (point.supporting_tickers || []).length
+        ? `<span class="overall-point-tickers">${point.supporting_tickers.join(', ')}</span>`
+        : '';
+      return `<li><span>${point.text}</span>${tickers}</li>`;
+    }).join('');
+  } else {
+    hide('overall-answer-section');
+  }
+
+  if (deepDives.length) {
+    show('company-deep-dives-section');
+    $('company-deep-dives-list').innerHTML = deepDives.map(buildCompanyDeepDiveCard).join('');
+  } else {
+    hide('company-deep-dives-section');
+  }
+
+  if (coverageNotes.length) {
+    show('coverage-section');
+    $('coverage-list').innerHTML = coverageNotes.map(g => `<li>${g}</li>`).join('');
+  } else {
+    hide('coverage-section');
+  }
 
   const list = $('claims-list');
   list.innerHTML = '';
-  if (!data.claims?.length) {
-    list.innerHTML = '<p class="empty-state">No claims generated. Try a different question or ingest more filings.</p>';
+  if (!claims.length) {
+    hide('claims-section');
   } else {
-    data.claims.forEach(c => list.appendChild(buildClaimCard(c)));
+    claims.forEach(c => list.appendChild(buildClaimCard(c)));
+    $('claims-audit-details').open = false;
+    show('claims-section');
   }
-  show('claims-section');
+}
+
+function buildCompanyDeepDiveCard(dive) {
+  const statusClass = dive.status === 'supported' ? 'deep-dive-supported' : 'deep-dive-insufficient';
+  const statusLabel = dive.status === 'supported' ? 'Supported' : 'Insufficient Evidence';
+  const evidence = (dive.evidence || []).map(item => {
+    const url = edgarUrl(item.cik, item.accession_number);
+    const link = url
+      ? `<a class="sec-link" href="${url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>`
+      : '';
+    return `
+      <div class="deep-dive-evidence-item">
+        <div class="deep-dive-evidence-meta">
+          ${item.company_ticker} &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
+          ${link}
+        </div>
+        <div class="deep-dive-evidence-text">${item.excerpt}</div>
+      </div>
+    `;
+  }).join('');
+
+  const gaps = (dive.gaps || []).map(gap => `<li>${gap}</li>`).join('');
+
+  return `
+    <article class="deep-dive-card ${statusClass}">
+      <div class="deep-dive-header">
+        <div>
+          <div class="deep-dive-ticker">${dive.ticker || '—'}</div>
+          <div class="deep-dive-name">${dive.company_name || ''}</div>
+        </div>
+        <span class="deep-dive-status">${statusLabel}</span>
+      </div>
+      <p class="deep-dive-summary">${dive.summary || ''}</p>
+      ${evidence ? `<div class="deep-dive-evidence-list">${evidence}</div>` : ''}
+      ${gaps ? `<ul class="deep-dive-gaps">${gaps}</ul>` : ''}
+    </article>
+  `;
 }
 
 function buildClaimCard(claim) {
@@ -559,7 +650,8 @@ async function toggleEvidence(claimId) {
 }
 
 async function loadEvidence(claimId) {
-  const claim = (state.answer?.claims || []).find(c => c.claim_id === claimId);
+  const claims = getAuditClaims(state.answer);
+  const claim = claims.find(c => c.claim_id === claimId);
   if (!claim) return;
   const drawer = $(`evidence-${claimId}`);
   const items = await Promise.all((claim.supporting_chunk_ids || []).map(async cid => {

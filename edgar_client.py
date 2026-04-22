@@ -22,39 +22,75 @@ def _safe_str(val) -> str:
 
 
 def search_companies_by_sic(sic_code: str) -> list[dict]:
-    try:
-        companies = edgar.get_entity_submissions(sic=sic_code)
-        results = []
-        for c in companies[:50]:
-            results.append({
-                "ticker": _safe_str(getattr(c, "tickers", [""])[0] if getattr(c, "tickers", []) else ""),
-                "name": _safe_str(getattr(c, "name", "")),
-                "cik": _safe_str(getattr(c, "cik", "")),
-                "sic": sic_code,
-            })
-        return results
-    except Exception:
-        return _search_companies_by_sic_fallback(sic_code)
+    """
+    Two-step EDGAR lookup:
+    1. Atom feed → CIKs for the given SIC code
+    2. data.sec.gov submissions JSON → company name + ticker per CIK
+    """
+    import httpx
+    import xml.etree.ElementTree as ET
 
+    headers = {"User-Agent": EDGAR_IDENTITY}
 
-def _search_companies_by_sic_fallback(sic_code: str) -> list[dict]:
+    # Step 1: Collect CIKs from EDGAR atom feed
     try:
-        company_search = edgar.CompanySearchIndex()
-        results = []
-        for entry in company_search:
-            if _safe_str(getattr(entry, "sic", "")) == sic_code:
-                tickers = getattr(entry, "tickers", []) or []
-                results.append({
-                    "ticker": tickers[0] if tickers else "",
-                    "name": _safe_str(getattr(entry, "name", "")),
-                    "cik": _safe_str(getattr(entry, "cik", "")),
-                    "sic": sic_code,
-                })
-                if len(results) >= 50:
+        resp = httpx.get(
+            "https://www.sec.gov/cgi-bin/browse-edgar",
+            params={
+                "action": "getcompany",
+                "SIC": sic_code,
+                "type": "10-K",
+                "dateb": "",
+                "owner": "include",
+                "count": "40",
+                "search_text": "",
+                "output": "atom",
+            },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+
+        ciks = []
+        for entry in root.iter():
+            tag = entry.tag.split("}")[-1] if "}" in entry.tag else entry.tag
+            if tag != "entry":
+                continue
+            for child in entry.iter():
+                ctag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                if ctag == "cik" and child.text:
+                    cik = child.text.strip().lstrip("0") or "0"
+                    if cik not in ciks:
+                        ciks.append(cik)
                     break
-        return results
     except Exception:
         return []
+
+    if not ciks:
+        return []
+
+    # Step 2: Resolve each CIK → name + ticker via data.sec.gov
+    results = []
+    with httpx.Client(headers=headers, timeout=10) as client:
+        for cik in ciks[:25]:
+            try:
+                data = client.get(
+                    f"https://data.sec.gov/submissions/CIK{cik.zfill(10)}.json"
+                ).json()
+                name = data.get("name", "")
+                tickers = data.get("tickers", [])
+                if name:
+                    results.append({
+                        "ticker": tickers[0] if tickers else "",
+                        "name": name,
+                        "cik": cik,
+                        "sic": sic_code,
+                    })
+            except Exception:
+                pass
+
+    return results
 
 
 def search_company_by_name(query: str) -> list[dict]:

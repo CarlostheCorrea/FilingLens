@@ -11,7 +11,13 @@ def verify_claim(req: VerifyRequest) -> dict:
     answer = hitl.load_answer(req.proposal_id)
     evidence = []
     if answer:
-        for claim in answer.get("claims", []):
+        # Support current nested audit schema plus older cached formats.
+        claims_list = (
+            answer.get("answer", {}).get("claims_audit", {}).get("claims")
+            or answer.get("answer", {}).get("claims")
+            or answer.get("claims", [])
+        )
+        for claim in claims_list:
             if claim.get("claim_id") == req.claim_id:
                 for cid in claim.get("supporting_chunk_ids", []):
                     chunk = rag_pipeline.get_chunk_by_id(cid)

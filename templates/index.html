@@ -83,6 +83,8 @@
                 <span class="chip active" data-type="10-K" onclick="toggleManualForm(this)">10-K</span>
                 <span class="chip active" data-type="10-Q" onclick="toggleManualForm(this)">10-Q</span>
                 <span class="chip" data-type="8-K" onclick="toggleManualForm(this)">8-K</span>
+                <span class="chip" data-type="20-F" onclick="toggleManualForm(this)">20-F</span>
+                <span class="chip" data-type="6-K" onclick="toggleManualForm(this)">6-K</span>
               </div>
             </div>
             <div>
@@ -203,16 +205,32 @@
           <div class="spinner"></div>
           <p>Retrieving relevant chunks and generating answer&hellip;</p>
         </div>
-        <div id="gaps-section" class="hidden">
-          <h3 class="gaps-title">Coverage Gaps</h3>
-          <ul id="gaps-list" class="gaps-list"></ul>
+        <div id="overall-answer-section" class="hidden">
+          <h3>Overall Answer</h3>
+          <div class="overall-answer-card">
+            <p id="overall-answer-summary" class="overall-answer-summary"></p>
+            <ul id="overall-answer-points" class="overall-answer-points"></ul>
+          </div>
+        </div>
+        <div id="company-deep-dives-section" class="hidden">
+          <div class="panel-header">
+            <h3>Company Deep Dives</h3>
+            <span class="badge badge-blue">Question-Adaptive</span>
+          </div>
+          <div id="company-deep-dives-list" class="company-deep-dives-list"></div>
+        </div>
+        <div id="coverage-section" class="hidden">
+          <h3 class="gaps-title">Coverage Notes</h3>
+          <ul id="coverage-list" class="gaps-list"></ul>
         </div>
         <div id="claims-section" class="hidden">
-          <div class="panel-header">
-            <h3>Claims</h3>
-            <span class="badge badge-blue">Checkpoint 2 &mdash; Verify Each Claim</span>
-          </div>
-          <div id="claims-list"></div>
+          <details id="claims-audit-details" class="claims-audit">
+            <summary class="claims-audit-summary">
+              <span>Claims Audit</span>
+              <span class="badge badge-blue">Checkpoint 2 &mdash; Verify Each Claim</span>
+            </summary>
+            <div id="claims-list" class="claims-audit-body"></div>
+          </details>
         </div>
       </section>
 

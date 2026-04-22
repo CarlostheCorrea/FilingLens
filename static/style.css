@@ -355,6 +355,172 @@ input[type="text"]:focus { border-color: var(--accent); }
 .gaps-list { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
 .gaps-list li { padding: 8px 12px; background: var(--yellow-light); border-left: 3px solid var(--yellow); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 12px; color: #92400e; }
 
+.overall-answer-card {
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f7ff 100%);
+  border: 1px solid #dbe7ff;
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-bottom: 18px;
+}
+.overall-answer-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.overall-answer-points {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.overall-answer-points li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,.7);
+  border: 1px solid #e4ecff;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.overall-point-tickers {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.company-deep-dives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.deep-dive-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 16px;
+}
+.deep-dive-supported {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+.deep-dive-insufficient {
+  border-color: #fde68a;
+  background: linear-gradient(180deg, #ffffff 0%, #fffdf5 100%);
+}
+.deep-dive-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.deep-dive-ticker {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.deep-dive-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.deep-dive-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--accent-light);
+  color: var(--accent);
+  border: 1px solid #bfdbfe;
+  white-space: nowrap;
+}
+.deep-dive-insufficient .deep-dive-status {
+  background: var(--yellow-light);
+  color: #92400e;
+  border-color: #fde68a;
+}
+.deep-dive-summary {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.deep-dive-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.deep-dive-evidence-item {
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+.deep-dive-evidence-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+.deep-dive-evidence-text {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.deep-dive-gaps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.deep-dive-gaps li {
+  padding: 8px 10px;
+  background: var(--yellow-light);
+  border-left: 3px solid var(--yellow);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 11px;
+  color: #92400e;
+}
+
+.claims-audit {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  margin-top: 8px;
+}
+.claims-audit-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+.claims-audit-summary::-webkit-details-marker { display: none; }
+.claims-audit-summary::after {
+  content: "▸";
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.claims-audit[open] .claims-audit-summary::after {
+  content: "▾";
+}
+.claims-audit-body {
+  padding: 0 16px 8px;
+}
+
 .claim-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

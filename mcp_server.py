@@ -135,7 +135,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             limit = arguments.get("limit", 10)
             result = edgar_client.list_filings(
                 cik=arguments["cik"],
-                form_types=["10-K", "10-Q", "8-K"],
+                form_types=["10-K", "10-Q", "8-K", "20-F", "6-K"],
                 since_date="2022-01-01",
                 until_date="2026-12-31",
             )[:limit]

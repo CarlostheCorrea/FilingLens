@@ -102,6 +102,13 @@ class MCPClient:
         })
         return result if isinstance(result, list) else []
 
+    async def list_recent_filings_for_company(self, cik: str, limit: int = 10) -> list[dict]:
+        result = await self.call_tool("list_recent_filings_for_company", {
+            "cik": cik,
+            "limit": limit,
+        })
+        return result if isinstance(result, list) else []
+
     async def fetch_filing(self, accession_number: str, cik: str | None = None) -> dict:
         args = {"accession_number": accession_number}
         if cik:

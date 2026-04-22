@@ -45,6 +45,21 @@ SCOPE_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "list_recent_filings_for_company",
+            "description": "List recent filing metadata for a company to determine which SEC form types it actually uses.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cik": {"type": "string"},
+                    "limit": {"type": "integer", "default": 6},
+                },
+                "required": ["cik"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_ticker_to_cik",
             "description": "Resolve a stock ticker to company metadata including CIK.",
             "parameters": {
@@ -65,11 +80,50 @@ async def _run_tool(name: str, args: dict) -> str:
         result = await mcp.list_companies_by_sector(args["sic_code"])
     elif name == "search_company":
         result = await mcp.search_company(args["query"])
+    elif name == "list_recent_filings_for_company":
+        result = await mcp.list_recent_filings_for_company(
+            args["cik"],
+            limit=args.get("limit", 6),
+        )
     elif name == "resolve_ticker_to_cik":
         result = await mcp.resolve_ticker_to_cik(args["ticker"])
     else:
         result = {"error": f"Unknown tool: {name}"}
     return json.dumps(result)
+
+
+async def _normalize_form_types(
+    companies: list[Company],
+    proposed_form_types: list[str],
+) -> list[str]:
+    mcp = get_mcp_client()
+    normalized: list[str] = []
+
+    def add_form(form_type: str) -> None:
+        form = str(form_type or "").strip().upper()
+        if form and form not in normalized:
+            normalized.append(form)
+
+    for form_type in proposed_form_types or ["10-K"]:
+        add_form(form_type)
+
+    supported_forms = {"10-K", "10-Q", "8-K", "20-F", "6-K"}
+    discovered_forms: set[str] = set()
+
+    for company in companies:
+        if not company.cik:
+            continue
+        recent_filings = await mcp.list_recent_filings_for_company(company.cik, limit=6)
+        for filing in recent_filings:
+            form_type = str(filing.get("form_type", "")).strip().upper()
+            if form_type in supported_forms:
+                discovered_forms.add(form_type)
+
+    if {"20-F", "6-K"} & discovered_forms:
+        add_form("20-F")
+        add_form("6-K")
+
+    return normalized
 
 
 async def propose_scope(query: str) -> ScopeProposal:
@@ -122,7 +176,10 @@ async def propose_scope(query: str) -> ScopeProposal:
             return ScopeProposal(
                 proposal_id=proposal_id,
                 companies=companies,
-                form_types=raw.get("form_types", ["10-K"]),
+                form_types=await _normalize_form_types(
+                    companies,
+                    raw.get("form_types", ["10-K"]),
+                ),
                 date_range=raw.get("date_range", ["2022-01-01", "2025-12-31"]),
                 overall_rationale=raw.get("overall_rationale", ""),
             )

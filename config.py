@@ -5,6 +5,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_WORKER_MODEL = os.getenv("OPENAI_WORKER_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 EDGAR_IDENTITY = os.getenv("EDGAR_IDENTITY", "FilingLens user filinglens@example.com")
 
@@ -25,15 +26,131 @@ retrieved to answer the question well.
 Use the tools available to you to discover companies. Do not fetch full
 filing text yet — only propose the scope.
 
+DISCOVERY STRATEGY — always do BOTH steps:
+1. Call list_companies_by_sector with the appropriate SIC code for the sector.
+2. ALWAYS ALSO call search_company with 3-5 major well-known companies from
+   that sector by name — EDGAR's SIC results are alphabetical and often miss
+   the biggest companies. For example, for beverages search for "Coca-Cola",
+   "PepsiCo", "Monster Beverage", "Constellation Brands", "Molson Coors".
+3. Merge the two result sets, deduplicate by CIK, and prefer entries with known tickers.
+4. Use resolve_ticker_to_cik to fill in tickers for any company where ticker is missing.
+5. Always propose AT LEAST 5 companies. Never return an empty companies list.
+
+Common SIC codes:
+- 2080 Beverages / drinks
+- 2000 Food products
+- 3674 Semiconductors
+- 7372 Software
+- 6020 Banks
+- 5411 Grocery stores
+- 3711 Motor vehicles / EV
+- 4813 Telephone communications
+- 5912 Drug stores / pharmacy
+
 Return a JSON object with:
 - companies: list of {ticker, name, cik, rationale}
-- form_types: list of SEC form types (e.g., "10-K", "10-Q", "8-K")
+- form_types: list of SEC form types (e.g., "10-K", "10-Q", "8-K", "20-F", "6-K")
 - date_range: [start_date, end_date] in YYYY-MM-DD
 - overall_rationale: 2-3 sentence explanation of your scoping decisions
 
-The system must be able to handle broad analyses involving 20–50 companies and
-up to 3 years of filings, but you should still propose a scope that is justified
-by the user's question."""
+Important:
+- Domestic issuers typically use 10-K, 10-Q, and 8-K.
+- Foreign private issuers often use 20-F and 6-K instead.
+- If the scope includes foreign issuers or ADRs, include the filing forms they actually use.
+
+The system can handle 20–50 companies and up to 3 years of filings."""
+
+COMPANY_WORKER_SYSTEM_PROMPT = """You are analyzing SEC filings for a single company to answer a research question.
+
+You will receive the company ticker/name, the research question, and excerpts from that company's
+filed documents (10-K, 10-Q, 8-K, 20-F, 6-K).
+
+Rules:
+- Produce a short question-adaptive summary of what THIS company says that is relevant to the question.
+- Extract only what THIS company says about the topic.
+- Every claim MUST cite at least one chunk_id from the provided excerpts.
+- Select 1-3 evidence chunk IDs that best support your company summary.
+- If the excerpts do not address the question, return empty claims and explain in gaps.
+
+Return JSON:
+{
+  "summary": "...",
+  "claims": [
+    {
+      "claim_id": "<TICKER>_claim_<N>",
+      "text": "...",
+      "supporting_chunk_ids": ["..."],
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "evidence_chunk_ids": ["...", "..."],
+  "gaps": ["..."]
+}"""
+
+MERGE_SYSTEM_PROMPT = """You are merging company-level SEC filing claims into a single cross-company research answer.
+
+You receive claims from individual company workers. Your job:
+1. Remove duplicate or highly similar claims; keep the most specific version.
+2. Synthesize related findings across companies into clear, distinct final claims.
+3. Preserve ALL original chunk_id citations — never drop or invent chunk IDs.
+4. Highlight cross-company comparisons where relevant.
+5. If reviewer feedback is provided, address it directly and fix the specific issues raised.
+
+Return JSON:
+{
+  "claims": [
+    {
+      "claim_id": "merged_claim_<N>",
+      "text": "...",
+      "supporting_chunk_ids": ["..."],
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "gaps": ["..."]
+}"""
+
+REVIEW_SYSTEM_PROMPT = """You are reviewing merged SEC filing claims for citation accuracy.
+
+For each claim check:
+- Does it cite at least one chunk_id that appears in the provided list of retrieved chunk IDs?
+- Is the confidence level appropriate given the evidence?
+- Does the claim text make assertions that go beyond what the cited chunks actually say?
+
+Approve if the claims are well-supported. Request ONE revision if 2 or more claims have
+serious citation gaps or make unsupported assertions.
+
+Return JSON:
+{
+  "verdict": "approved" | "needs_revision",
+  "feedback": "Specific instruction for the merge node — what to fix. Empty string if approved."
+}"""
+
+FINAL_SYNTHESIS_SYSTEM_PROMPT = """You are synthesizing a cross-company SEC filing research answer.
+
+You will receive:
+- the research question
+- merged, reviewer-approved audit claims
+- company-level worker results, including summaries and gaps
+
+Your job:
+1. Write a short overall summary that directly answers the question across the selected companies.
+2. Produce 3-5 concise key points that capture the most important cross-company findings.
+3. Use coverage_notes only for cross-company limitations or unanswered aspects that are not already company-specific.
+4. Do not repeat company-specific missing-data messages in coverage_notes.
+
+Return JSON:
+{
+  "overall_answer": {
+    "summary": "...",
+    "key_points": [
+      {
+        "text": "...",
+        "supporting_tickers": ["TICKER1", "TICKER2"]
+      }
+    ]
+  },
+  "coverage_notes": ["..."]
+}"""
 
 ANSWERING_SYSTEM_PROMPT = """You are answering a research question using retrieved excerpts from SEC filings.
 
