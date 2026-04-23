@@ -498,6 +498,7 @@ async function generateAnswer(forceRefresh = false) {
   show('answer-panel');
   show('answer-loading');
   hide('overall-answer-section');
+  hide('judge-section');
   hide('company-deep-dives-section');
   hide('coverage-section');
   hide('claims-section');
@@ -528,6 +529,9 @@ async function generateAnswer(forceRefresh = false) {
       const auditClaims = getAuditClaims(data);
       const deepDives = ans.company_deep_dives || [];
       log(`Answer: ${auditClaims.length} audit claims, ${deepDives.length} company deep dives`, 'success');
+      if (ans.judge_evaluation) {
+        log(`Judge: ${ans.judge_evaluation.overall_verdict}, grounding ${ans.judge_evaluation.grounding}/5`, 'info');
+      }
       // Log each workflow stage to the activity log
       if (data.workflow?.stages) {
         data.workflow.stages.forEach(s => log(`[${s.name}] ${s.summary}`, 'info'));
@@ -549,6 +553,7 @@ function renderAnswer(data) {
   const keyPoints = overall.key_points || [];
   const deepDives = ans.company_deep_dives || [];
   const coverageNotes = ans.coverage_notes || [];
+  const judge = ans.judge_evaluation || null;
   const claims = getAuditClaims(data);
 
   if (overall.summary || keyPoints.length) {
@@ -562,6 +567,32 @@ function renderAnswer(data) {
     }).join('');
   } else {
     hide('overall-answer-section');
+  }
+
+  if (judge) {
+    const verdictClass = `judge-verdict-${judge.overall_verdict || 'mixed'}`;
+    const riskClass = `judge-risk-${judge.overclaiming_risk || 'medium'}`;
+    $('judge-verdict').className = `judge-verdict ${verdictClass}`;
+    $('judge-verdict').textContent = `Verdict: ${(judge.overall_verdict || 'mixed').replace('_', ' ')}`;
+    $('judge-summary').textContent = judge.summary || '';
+    $('judge-overclaiming').className = `judge-risk ${riskClass}`;
+    $('judge-overclaiming').textContent = `Overclaiming risk: ${judge.overclaiming_risk || 'medium'}`;
+    $('judge-score-grid').innerHTML = [
+      ['Helpfulness', judge.helpfulness],
+      ['Clarity', judge.clarity],
+      ['Grounding', judge.grounding],
+      ['Citation quality', judge.citation_quality],
+    ].map(([label, score]) => `
+      <div class="judge-score-card">
+        <span class="judge-score-label">${label}</span>
+        <span class="judge-score-value">${score}/5</span>
+      </div>
+    `).join('');
+    $('judge-strengths').innerHTML = (judge.strengths || []).map(item => `<li>${item}</li>`).join('') || '<li>No strengths noted.</li>';
+    $('judge-concerns').innerHTML = (judge.concerns || []).map(item => `<li>${item}</li>`).join('') || '<li>No major concerns noted.</li>';
+    show('judge-section');
+  } else {
+    hide('judge-section');
   }
 
   if (deepDives.length) {

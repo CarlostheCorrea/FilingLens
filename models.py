@@ -97,11 +97,24 @@ class ClaimsAuditPayload(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
 
 
+class JudgeEvaluation(BaseModel):
+    helpfulness: int
+    clarity: int
+    grounding: int
+    citation_quality: int
+    overclaiming_risk: str
+    overall_verdict: str
+    summary: str
+    strengths: list[str] = Field(default_factory=list)
+    concerns: list[str] = Field(default_factory=list)
+
+
 class StructuredAnswerPayload(BaseModel):
     overall_answer: OverallAnswer
     company_deep_dives: list[CompanyDeepDive] = Field(default_factory=list)
     claims_audit: ClaimsAuditPayload
     coverage_notes: list[str] = Field(default_factory=list)
+    judge_evaluation: Optional[JudgeEvaluation] = None
 
 
 class WorkflowAnswerResponse(BaseModel):

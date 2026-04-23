@@ -49,6 +49,14 @@ def log_answer(proposal_id: str, query: str, claims: list, gaps: list, chunks_re
     })
 
 
+def log_judge(proposal_id: str, query: str, judge: dict):
+    _log("judge", {
+        "proposal_id": proposal_id,
+        "query": query,
+        "judge": judge,
+    })
+
+
 def log_verification(proposal_id: str, claim_id: str, verdict: str):
     _log("verification", {
         "proposal_id": proposal_id,

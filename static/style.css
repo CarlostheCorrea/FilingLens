@@ -521,6 +521,85 @@ input[type="text"]:focus { border-color: var(--accent); }
   padding: 0 16px 8px;
 }
 
+.judge-card {
+  border: 1px solid #ddd6fe;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #faf8ff 0%, #ffffff 100%);
+  padding: 16px;
+}
+.judge-header-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.judge-verdict {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 6px;
+}
+.judge-verdict-strong { background: var(--green-light); color: var(--green); border: 1px solid #bbf7d0; }
+.judge-verdict-mixed { background: var(--yellow-light); color: var(--yellow); border: 1px solid #fde68a; }
+.judge-verdict-weak { background: var(--red-light); color: var(--red); border: 1px solid #fecaca; }
+.judge-summary {
+  font-size: 13px;
+  color: var(--text-primary);
+  max-width: 700px;
+}
+.judge-risk {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.judge-risk-low { background: var(--green-light); color: var(--green); }
+.judge-risk-medium { background: var(--yellow-light); color: var(--yellow); }
+.judge-risk-high { background: var(--red-light); color: var(--red); }
+.judge-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.judge-score-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.judge-score-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .35px;
+  margin-bottom: 4px;
+}
+.judge-score-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.judge-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.judge-list {
+  margin-left: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.judge-list li + li { margin-top: 6px; }
+
 .claim-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -997,6 +1076,8 @@ input[type="text"]:focus { border-color: var(--accent); }
   .scope-meta { grid-template-columns: 1fr; }
   .ingestion-stats { grid-template-columns: repeat(3, 1fr); }
   .manual-row-2 { grid-template-columns: 1fr; }
+  .judge-score-grid,
+  .judge-columns,
   .compare-grid,
   .compare-meta-grid,
   .compare-bullet-columns,

@@ -6,6 +6,7 @@ from answer_workflow import run_answer_workflow
 from models import WorkflowAnswerResponse
 from pydantic import ValidationError
 import hitl
+from services.judge_service import judge_answer
 import logging_utils
 import rag_pipeline
 from config import DATA_DIR
@@ -35,7 +36,14 @@ async def answer(
             with open(cache_path) as f:
                 data = json.load(f)
             data["from_cache"] = True
-            return WorkflowAnswerResponse(**data), True
+            cached = WorkflowAnswerResponse(**data)
+            if cached.answer.judge_evaluation is None:
+                cached.answer.judge_evaluation = await judge_answer(cached)
+                with open(cache_path, "w") as f:
+                    json.dump({**cached.model_dump(), "from_cache": False}, f)
+                hitl.save_answer(proposal_id, cached.model_dump(), answer_key="latest")
+            cached.from_cache = True
+            return cached, True
         except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
             pass
 
@@ -52,6 +60,7 @@ async def answer(
 
     # ── Run supervisor workflow ────────────────────────────────────────────────
     result = await run_answer_workflow(proposal_id, query, companies)
+    result.answer.judge_evaluation = await judge_answer(result)
 
     # ── Persist cache + history ───────────────────────────────────────────────
     with open(cache_path, "w") as f:
@@ -69,6 +78,11 @@ async def answer(
         [c.model_dump() for c in result.answer.claims_audit.claims],
         result.answer.coverage_notes,
         [c.chunk_id for c in chunks],
+    )
+    logging_utils.log_judge(
+        proposal_id,
+        query,
+        result.answer.judge_evaluation.model_dump() if result.answer.judge_evaluation else {},
     )
 
     return result, False

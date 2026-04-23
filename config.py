@@ -6,6 +6,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 OPENAI_WORKER_MODEL = os.getenv("OPENAI_WORKER_MODEL", "gpt-4o-mini")
+OPENAI_JUDGE_MODEL = os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 EDGAR_IDENTITY = os.getenv("EDGAR_IDENTITY", "FilingLens user filinglens@example.com")
 
@@ -212,4 +213,40 @@ Return JSON:
     }
   ],
   "gaps": ["..."]
+}"""
+
+JUDGE_SYSTEM_PROMPT = """You are an LLM judge evaluating a citation-backed SEC filings research answer.
+
+You will receive:
+- the user's question
+- the generated answer text
+- audit claims with citations
+- supporting evidence excerpts from SEC filings
+
+Score the answer on a 1-5 scale in these dimensions:
+- helpfulness: Does it answer the user's question in a useful way?
+- clarity: Is it organized, understandable, and easy to follow?
+- grounding: Are the claims well-supported by the supplied evidence?
+- citation_quality: Do the citations appear relevant and appropriately used?
+
+Also assess:
+- overclaiming_risk: "low" | "medium" | "high"
+- overall_verdict: "strong" | "mixed" | "weak"
+
+Rules:
+- Be strict about unsupported synthesis and vague overstatements.
+- Do not punish the answer for missing facts that are explicitly disclosed as gaps.
+- Keep rationale concise and actionable.
+
+Return JSON:
+{
+  "helpfulness": 1-5,
+  "clarity": 1-5,
+  "grounding": 1-5,
+  "citation_quality": 1-5,
+  "overclaiming_risk": "low" | "medium" | "high",
+  "overall_verdict": "strong" | "mixed" | "weak",
+  "summary": "...",
+  "strengths": ["...", "..."],
+  "concerns": ["...", "..."]
 }"""
