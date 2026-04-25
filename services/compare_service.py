@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import uuid
+import uuid  # still used for compare_run_id
 from bisect import bisect_left
 
 from answer_workflow import _create_json_completion
@@ -13,6 +13,7 @@ from config import (
     COMPARE_SYNTHESIS_SYSTEM_PROMPT,
     OPENAI_MODEL,
     OPENAI_WORKER_MODEL,
+    VECTOR_SCHEMA_VERSION,
 )
 from edgar_client import resolve_ticker_to_cik
 import logging_utils
@@ -52,9 +53,6 @@ def _compare_key(req: CompareRequest) -> str:
 def _cache_path(key: str) -> str:
     return os.path.join(COMPARE_STATE_DIR, f"{key}.json")
 
-
-def _collection_name(compare_run_id: str) -> str:
-    return f"compare_{compare_run_id}"
 
 
 def _normalize_forms(form_types: list[str]) -> list[str]:
@@ -255,12 +253,8 @@ def _build_filing_events(companies: list[Company], filings_by_ticker: dict[str, 
     return events
 
 
-async def _compare_company(query: str, company: Company, collection_name: str) -> CompanyComparison:
-    chunks = rag_pipeline.retrieve(
-        query,
-        tickers=[company.ticker],
-        collection_name=collection_name,
-    )
+async def _compare_company(query: str, company: Company, store: rag_pipeline.EphemeralStore) -> CompanyComparison:
+    chunks = store.retrieve(query, tickers=[company.ticker])
 
     if not chunks:
         return CompanyComparison(
@@ -342,20 +336,23 @@ async def compare_companies(req: CompareRequest, force_refresh: bool = False) ->
     if not force_refresh and os.path.exists(cache_path):
         with open(cache_path) as handle:
             data = json.load(handle)
-        data["from_cache"] = True
-        return CompareResponse(**data), True
+        if data.get("retrieval_version") == VECTOR_SCHEMA_VERSION:
+            data["from_cache"] = True
+            return CompareResponse(**data), True
 
     companies = [
         _company_from_ticker(req.ticker_a),
         _company_from_ticker(req.ticker_b),
     ]
     compare_run_id = f"cmp_{uuid.uuid4().hex[:10]}"
-    collection_name = _collection_name(compare_run_id)
 
     filings_by_ticker: dict[str, list[dict]] = {}
     issues_by_ticker: dict[str, list[str]] = {}
     form_types = _normalize_forms(req.form_types)
     mcp = get_mcp_client()
+
+    # One in-memory store per compare run — no disk writes, no SQLite locks.
+    store = rag_pipeline.EphemeralStore()
 
     for company in companies:
         issues_by_ticker[company.ticker] = []
@@ -397,12 +394,12 @@ async def compare_companies(req: CompareRequest, force_refresh: bool = False) ->
             }
             filings_by_ticker[company.ticker].append(filing_record)
 
-            chunks = rag_pipeline.chunk_filing(filing_text)
-            if chunks:
-                rag_pipeline.embed_chunks(chunks, collection_name=collection_name)
+            focused = rag_pipeline.filter_sections_by_query(filing_text, req.query)
+            chunks = rag_pipeline.chunk_filing(focused)
+            store.add_chunks(chunks)
 
     comparisons = [
-        await _compare_company(req.query, company, collection_name)
+        await _compare_company(req.query, company, store)
         for company in companies
     ]
     for comparison in comparisons:
@@ -414,6 +411,7 @@ async def compare_companies(req: CompareRequest, force_refresh: bool = False) ->
     result = CompareResponse(
         compare_run_id=compare_run_id,
         from_cache=False,
+        retrieval_version=VECTOR_SCHEMA_VERSION,
         companies=companies,
         overall_summary=overall_summary,
         company_comparisons=comparisons,

@@ -50,11 +50,108 @@ def test_chunk_size_reasonable():
 
 
 def test_embed_and_retrieve(monkeypatch):
-    """Smoke test — skipped if OPENAI_API_KEY not set."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY not set")
     from rag_pipeline import chunk_filing, embed_chunks, retrieve
+
+    class _Resp:
+        def __init__(self, vectors):
+            self.data = [type("Embed", (), {"embedding": vector})() for vector in vectors]
+
+    def fake_embed(*, model, input):
+        vectors = []
+        for text in input:
+            lowered = text.lower()
+            if "supply chain" in lowered or "risk" in lowered:
+                vectors.append([1.0, 0.0])
+            else:
+                vectors.append([0.0, 1.0])
+        return _Resp(vectors)
+
+    monkeypatch.setattr(__import__("rag_pipeline")._openai.embeddings, "create", fake_embed)
     chunks = chunk_filing(SAMPLE_FILING)
-    embed_chunks(chunks[:2])
-    results = retrieve("supply chain risk", k=2)
+    embed_chunks(chunks[:2], collection_name="test_embed_and_retrieve")
+    results = retrieve("supply chain risk", k=2, collection_name="test_embed_and_retrieve")
     assert isinstance(results, list)
+    assert results
+
+
+def test_filter_sections_by_query_uses_deep_windows(monkeypatch):
+    import rag_pipeline
+
+    filing = {
+        "metadata": {
+            "ticker": "BUD",
+            "company_name": "Anheuser-Busch InBev SA/NV",
+            "cik": "1668717",
+            "accession_number": "1668717-26-000001",
+            "form_type": "20-F",
+            "filing_date": "2026-03-03",
+        },
+        "sections": {
+            "item_4": ("History and development of the company. " * 300)
+            + ("Branding and marketing strategy focuses on brand investment and media. " * 120),
+            "item_5": "Operating review and finance. " * 200,
+        },
+    }
+
+    class _Resp:
+        def __init__(self, vectors):
+            self.data = [type("Embed", (), {"embedding": vector})() for vector in vectors]
+
+    def fake_embed(*, model, input):
+        vectors = []
+        for text in input:
+            lowered = text.lower().split("\n", 1)[-1]
+            if "branding" in lowered or "marketing" in lowered:
+                vectors.append([1.0, 0.0])
+            else:
+                vectors.append([0.0, 1.0])
+        return _Resp(vectors)
+
+    monkeypatch.setattr(rag_pipeline._openai.embeddings, "create", fake_embed)
+    monkeypatch.setattr(rag_pipeline.logging_utils, "log_section_focus", lambda *args, **kwargs: None)
+
+    focused = rag_pipeline.filter_sections_by_query(filing, "How is BUD approaching branding and marketing?")
+
+    assert focused["section_focuses"]
+    first_focus = focused["section_focuses"][0]
+    assert first_focus["section_name"] == "item_4"
+    assert first_focus["source_char_start"] > 4000
+    chunks = rag_pipeline.chunk_filing(focused)
+    assert chunks
+    assert chunks[0].metadata.section_window_index is not None
+
+
+def test_ensure_filing_embeddings_current_refreshes_on_schema_version(monkeypatch):
+    import rag_pipeline
+
+    filing = {
+        "metadata": {
+            "ticker": "TEST",
+            "company_name": "Test Corp",
+            "cik": "1",
+            "accession_number": "1-26-000001",
+            "form_type": "10-K",
+            "filing_date": "2026-01-01",
+        },
+        "sections": {"item_1": "business overview"},
+    }
+    calls = {"deleted": 0, "embedded": 0}
+
+    monkeypatch.setattr(
+        rag_pipeline,
+        "get_filing_chunk_state",
+        lambda accession_number, collection_name="sec_filings": {
+            "count": 3,
+            "vector_schema_version": "old-version",
+            "section_text_digest": "old-digest",
+        },
+    )
+    monkeypatch.setattr(rag_pipeline, "delete_filing_chunks", lambda accession_number, collection_name="sec_filings": calls.__setitem__("deleted", calls["deleted"] + 1))
+    monkeypatch.setattr(rag_pipeline, "embed_chunks", lambda chunks, collection_name="sec_filings": calls.__setitem__("embedded", len(chunks)))
+
+    result = rag_pipeline.ensure_filing_embeddings_current(filing)
+
+    assert result["status"] == "refreshed"
+    assert result["reason"] == "vector_schema_version"
+    assert calls["deleted"] == 1
+    assert calls["embedded"] > 0

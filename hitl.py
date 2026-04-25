@@ -57,6 +57,20 @@ def load_answer(proposal_id: str, answer_key: str = "latest") -> dict | None:
         return json.load(f)
 
 
+def save_ingestion_manifest(proposal_id: str, manifest: dict) -> None:
+    path = os.path.join(_STATE_DIR, f"{proposal_id}_ingestion.json")
+    with open(path, "w") as f:
+        json.dump(manifest, f)
+
+
+def load_ingestion_manifest(proposal_id: str) -> dict | None:
+    path = os.path.join(_STATE_DIR, f"{proposal_id}_ingestion.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
 def save_question(proposal_id: str, query: str, answer_key: str) -> None:
     history = load_history(proposal_id)
     # Don't duplicate

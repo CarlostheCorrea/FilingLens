@@ -58,9 +58,13 @@ async def test_ingest_falls_back_to_foreign_issuer_forms(monkeypatch):
 
     monkeypatch.setattr(ingestion_service.hitl, "load_approved_scope", lambda proposal_id: approved)
     monkeypatch.setattr(ingestion_service, "get_mcp_client", lambda: FakeMCP())
-    monkeypatch.setattr(ingestion_service.rag_pipeline, "chunk_filing", lambda filing_text: [object(), object()])
-    monkeypatch.setattr(ingestion_service.rag_pipeline, "embed_chunks", lambda chunks: None)
+    monkeypatch.setattr(
+        ingestion_service.rag_pipeline,
+        "ensure_filing_embeddings_current",
+        lambda filing_text: {"status": "refreshed", "reason": "missing_vectors", "chunks": 2},
+    )
     monkeypatch.setattr(ingestion_service.logging_utils, "log_ingestion", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ingestion_service.hitl, "save_ingestion_manifest", lambda *args, **kwargs: None)
 
     result = await ingestion_service.ingest("scope_test")
 
@@ -87,6 +91,7 @@ async def test_ingest_reports_missing_filings_when_none_exist(monkeypatch):
     monkeypatch.setattr(ingestion_service.hitl, "load_approved_scope", lambda proposal_id: approved)
     monkeypatch.setattr(ingestion_service, "get_mcp_client", lambda: FakeMCP())
     monkeypatch.setattr(ingestion_service.logging_utils, "log_ingestion", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ingestion_service.hitl, "save_ingestion_manifest", lambda *args, **kwargs: None)
 
     result = await ingestion_service.ingest("scope_test")
 

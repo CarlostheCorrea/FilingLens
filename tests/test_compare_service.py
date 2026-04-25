@@ -40,8 +40,6 @@ async def test_compare_companies_caches_and_uses_compare_collection(monkeypatch,
         "AAA": [_chunk_for("AAA", "1000-26-000001", "AAA discusses premium mix expansion.")],
         "BBB": [_chunk_for("BBB", "2000-26-000001", "BBB focuses on price discipline and distribution.")],
     }
-    embed_collections = []
-    retrieve_collections = []
     completion_calls = {"count": 0}
 
     monkeypatch.setattr(compare_service, "_cache_path", lambda key: str(tmp_path / f"{key}.json"))
@@ -73,17 +71,20 @@ async def test_compare_companies_caches_and_uses_compare_collection(monkeypatch,
 
     monkeypatch.setattr(compare_service, "get_mcp_client", lambda: FakeMCP())
     monkeypatch.setattr(compare_service.rag_pipeline, "chunk_filing", lambda filing_text: chunk_map[filing_text["metadata"]["ticker"]])
+    monkeypatch.setattr(compare_service.rag_pipeline, "filter_sections_by_query", lambda filing_text, query: filing_text)
 
-    def fake_embed_chunks(chunks, collection_name="sec_filings"):
-        embed_collections.append(collection_name)
+    class FakeStore:
+        def __init__(self):
+            self.by_ticker = {}
 
-    monkeypatch.setattr(compare_service.rag_pipeline, "embed_chunks", fake_embed_chunks)
+        def add_chunks(self, chunks):
+            for chunk in chunks:
+                self.by_ticker.setdefault(chunk.metadata.company_ticker, []).append(chunk)
 
-    def fake_retrieve(query, k=8, filters=None, tickers=None, collection_name="sec_filings"):
-        retrieve_collections.append(collection_name)
-        return chunk_map[tickers[0]]
+        def retrieve(self, query, tickers=None, k=8):
+            return list(self.by_ticker.get(tickers[0], []))
 
-    monkeypatch.setattr(compare_service.rag_pipeline, "retrieve", fake_retrieve)
+    monkeypatch.setattr(compare_service.rag_pipeline, "EphemeralStore", FakeStore)
     monkeypatch.setattr(compare_service.logging_utils, "log_compare", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         compare_service,
@@ -139,14 +140,17 @@ async def test_compare_companies_caches_and_uses_compare_collection(monkeypatch,
         price_lookback="3M",
     )
 
+    stale_key = compare_service._compare_key(req)
+    stale_cache = tmp_path / f"{stale_key}.json"
+    stale_cache.write_text('{"compare_run_id":"cmp_old","from_cache":false,"retrieval_version":"old-version","companies":[],"overall_summary":"stale","company_comparisons":[],"similarities":[],"differences":[],"stock_series":[],"filing_events":[]}')
+
     result, from_cache = await compare_service.compare_companies(req)
 
     assert not from_cache
+    assert result.retrieval_version == compare_service.VECTOR_SCHEMA_VERSION
     assert result.overall_summary
     assert len(result.company_comparisons) == 2
     assert len(result.filing_events) == 2
-    assert all(name.startswith("compare_cmp_") for name in embed_collections)
-    assert retrieve_collections and all(name == embed_collections[0] for name in retrieve_collections)
 
     cached_result, cached = await compare_service.compare_companies(req)
     assert cached is True

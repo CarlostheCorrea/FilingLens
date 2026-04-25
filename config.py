@@ -16,10 +16,21 @@ FILINGS_CACHE_DIR = os.path.join(DATA_DIR, "filings_cache")
 CHROMA_DIR = os.path.join(DATA_DIR, "chroma")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
 COMPARE_STATE_DIR = os.path.join(DATA_DIR, "compare_state")
+CHANGE_STATE_DIR = os.path.join(DATA_DIR, "change_state")
+LIBRARY_DIR = os.path.join(DATA_DIR, "library")
 
 CHUNK_SIZE_TOKENS = 800
 CHUNK_OVERLAP_TOKENS = 100
 RETRIEVAL_K = 8
+VECTOR_SCHEMA_VERSION = os.getenv("VECTOR_SCHEMA_VERSION", "2026-04-window-scout-v1")
+# Max characters extracted per section. Raised from 50k to cover long sections
+# like 20-F Item 4 (100+ pages) where marketing/branding content sits deep inside.
+# At ~5 chars/word this is ~60,000 words — enough for any standard filing section.
+SECTION_CHAR_LIMIT = int(os.getenv("SECTION_CHAR_LIMIT", 300_000))
+SECTION_SCOUT_WINDOW_CHARS = int(os.getenv("SECTION_SCOUT_WINDOW_CHARS", 4_000))
+SECTION_SCOUT_OVERLAP_CHARS = int(os.getenv("SECTION_SCOUT_OVERLAP_CHARS", 1_000))
+SECTION_SCOUT_TOP_WINDOWS = int(os.getenv("SECTION_SCOUT_TOP_WINDOWS", 2))
+SECTION_SCOUT_SCORE_THRESHOLD = float(os.getenv("SECTION_SCOUT_SCORE_THRESHOLD", 0.25))
 
 SCOPE_PROPOSAL_SYSTEM_PROMPT = """You are a SEC filings research assistant. When the user asks a research question,
 propose a SCOPE for analysis — the set of companies and filings that should be
@@ -191,6 +202,63 @@ Return JSON:
   "overall_summary": "...",
   "similarities": ["..."],
   "differences": ["..."]
+}"""
+
+CHANGE_DETECTION_SYSTEM_PROMPT = """You are analyzing how a single company's filing language changed across time.
+
+You will receive:
+- an analysis lens or question
+- one newer filing and one older filing from the same company
+- retrieved excerpts from each filing
+
+Your job:
+1. Identify only material changes that are grounded in the excerpts.
+2. Classify every change using exactly one category from this fixed taxonomy:
+   - new_risk_introduced
+   - risk_removed_or_deemphasized
+   - strategy_emphasis_increased
+   - capital_allocation_change
+   - pricing_or_margin_change
+   - guidance_or_outlook_change
+   - geographic_or_segment_shift
+   - market_positioning_change
+3. Every change must cite at least one before chunk and one after chunk.
+4. If no material change is supported, return an empty changes list and explain briefly.
+
+Return JSON:
+{
+  "window_summary": "...",
+  "changes": [
+    {
+      "change_id": "chg_<N>",
+      "category": "one_of_the_fixed_labels",
+      "summary": "...",
+      "importance": "high" | "medium" | "low",
+      "confidence": "high" | "medium" | "low",
+      "before_chunk_ids": ["..."],
+      "after_chunk_ids": ["..."]
+    }
+  ],
+  "gaps": ["..."]
+}"""
+
+CHANGE_SYNTHESIS_SYSTEM_PROMPT = """You are synthesizing filing change intelligence for one company across time.
+
+You will receive:
+- the analysis question
+- the company name and ticker
+- filing comparison windows
+- structured change cards detected for each window
+
+Your job:
+1. Write a concise overall summary of the most important filing language changes.
+2. Mention the themes that changed most materially across time.
+3. Do not infer causality about stock price moves.
+4. If evidence is weak, say so directly.
+
+Return JSON:
+{
+  "overall_summary": "..."
 }"""
 
 ANSWERING_SYSTEM_PROMPT = """You are answering a research question using retrieved excerpts from SEC filings.

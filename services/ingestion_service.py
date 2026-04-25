@@ -95,10 +95,12 @@ async def ingest(proposal_id: str) -> dict:
                     errors.append(f"{accession}: {filing_text['error']}")
                     continue
 
-                chunks = rag_pipeline.chunk_filing(filing_text)
-                if chunks:
-                    rag_pipeline.embed_chunks(chunks)
-                    total_chunks += len(chunks)
+                refresh = rag_pipeline.ensure_filing_embeddings_current(filing_text)
+                total_chunks += refresh.get("chunks", 0)
+                if refresh.get("status") == "refreshed" and refresh.get("reason") != "missing_vectors":
+                    issues.append(
+                        f"{company.ticker}: re-vectorized {accession} due to {refresh['reason']}."
+                    )
 
                 filings_fetched.append({
                     "accession_number": accession,
@@ -106,7 +108,7 @@ async def ingest(proposal_id: str) -> dict:
                     "company": company.ticker,
                     "form_type": filing_meta.get("form_type", ""),
                     "filing_date": filing_meta.get("filing_date", ""),
-                    "chunks": len(chunks),
+                    "chunks": refresh.get("chunks", 0),
                 })
 
             except Exception as e:
@@ -114,6 +116,13 @@ async def ingest(proposal_id: str) -> dict:
                 continue
 
     logging_utils.log_ingestion(proposal_id, filings_fetched, total_chunks)
+    hitl.save_ingestion_manifest(
+        proposal_id,
+        {
+            "proposal_id": proposal_id,
+            "filings": filings_fetched,
+        },
+    )
 
     return {
         "proposal_id": proposal_id,

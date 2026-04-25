@@ -3,7 +3,7 @@ import shutil
 import chromadb
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from config import CHROMA_DIR, FILINGS_CACHE_DIR, LOGS_DIR, DATA_DIR, COMPARE_STATE_DIR
+from config import CHROMA_DIR, FILINGS_CACHE_DIR, LOGS_DIR, DATA_DIR, COMPARE_STATE_DIR, CHANGE_STATE_DIR
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -56,8 +56,8 @@ async def data_status():
         },
         "sessions": {
             "label": "Scope, answer & compare sessions",
-            "size_mb": _paths_size_mb([_STATE_DIR, COMPARE_STATE_DIR]),
-            "files": _paths_file_count([_STATE_DIR, COMPARE_STATE_DIR]),
+            "size_mb": _paths_size_mb([_STATE_DIR, COMPARE_STATE_DIR, CHANGE_STATE_DIR]),
+            "files": _paths_file_count([_STATE_DIR, COMPARE_STATE_DIR, CHANGE_STATE_DIR]),
         },
         "logs": {
             "label": "Event logs",
@@ -96,6 +96,8 @@ async def clear_data(req: ClearRequest):
                 os.makedirs(_STATE_DIR, exist_ok=True)
                 shutil.rmtree(COMPARE_STATE_DIR, ignore_errors=True)
                 os.makedirs(COMPARE_STATE_DIR, exist_ok=True)
+                shutil.rmtree(CHANGE_STATE_DIR, ignore_errors=True)
+                os.makedirs(CHANGE_STATE_DIR, exist_ok=True)
                 cleared.append("sessions")
 
             elif target == "logs":

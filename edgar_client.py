@@ -9,7 +9,7 @@ import json
 import re
 from typing import Optional
 import edgar
-from config import EDGAR_IDENTITY, FILINGS_CACHE_DIR
+from config import EDGAR_IDENTITY, FILINGS_CACHE_DIR, SECTION_CHAR_LIMIT
 
 os.makedirs(FILINGS_CACHE_DIR, exist_ok=True)
 
@@ -113,18 +113,51 @@ def search_company_by_name(query: str) -> list[dict]:
         return []
 
 
+def _resolve_ticker_via_sec_api(ticker: str) -> dict:
+    """Fallback: look up ticker→CIK from SEC's company_tickers.json."""
+    try:
+        resp = httpx.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": EDGAR_IDENTITY},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        ticker_upper = ticker.strip().upper()
+        for entry in resp.json().values():
+            if str(entry.get("ticker", "")).upper() == ticker_upper:
+                cik = str(entry["cik_str"])
+                name = entry.get("title", ticker_upper)
+                # Fetch SIC from submissions endpoint
+                sic = ""
+                try:
+                    sub = httpx.get(
+                        f"https://data.sec.gov/submissions/CIK{cik.zfill(10)}.json",
+                        headers={"User-Agent": EDGAR_IDENTITY},
+                        timeout=10,
+                    ).json()
+                    sic = str(sub.get("sic", ""))
+                except Exception:
+                    pass
+                return {"ticker": ticker_upper, "name": name, "cik": cik, "sic": sic}
+    except Exception:
+        pass
+    return {}
+
+
 def resolve_ticker_to_cik(ticker: str) -> dict:
     try:
         company = edgar.Company(ticker)
-        tickers = getattr(company, "tickers", []) or []
-        return {
+        result = {
             "ticker": ticker.upper(),
             "name": _safe_str(getattr(company, "name", "")),
             "cik": _safe_str(getattr(company, "cik", "")),
             "sic": _safe_str(getattr(company, "sic", "")),
         }
+        if result["cik"]:
+            return result
     except Exception:
-        return {}
+        pass
+    return _resolve_ticker_via_sec_api(ticker)
 
 
 def list_filings(
@@ -172,17 +205,18 @@ def fetch_filing_text(accession_number: str, cik: str | None = None) -> dict:
         tickers = getattr(company, "tickers", []) or []
         ticker = tickers[0] if tickers else ""
 
+        form_type_raw = _safe_str(getattr(filing, "form", ""))
         metadata = {
             "ticker": ticker,
             "company_name": _safe_str(getattr(company, "name", "")),
             "cik": _safe_str(getattr(company, "cik", "")),
             "accession_number": accession_number,
-            "form_type": _safe_str(getattr(filing, "form", "")),
+            "form_type": form_type_raw,
             "filing_date": _safe_str(getattr(filing, "filing_date", "")),
             "acceptance_datetime": _filing_acceptance_datetime(filing),
         }
 
-        sections = _extract_sections(filing)
+        sections = _extract_sections(filing, form_type=form_type_raw)
 
         result = {"metadata": metadata, "sections": sections}
         with open(cache_path, "w") as f:
@@ -244,14 +278,55 @@ def _get_filing_by_accession(accession_number: str, cik: str | None = None):
     return None, None
 
 
-def _extract_sections(filing) -> dict:
-    sections = {}
-    target_items = {
-        "item_1": ["item 1.", "item1.", "business"],
+_SECTION_TARGETS = {
+    # 10-K annual report
+    "10-K": {
+        "item_1":  ["item 1.", "item1.", "business"],
         "item_1a": ["item 1a.", "item1a.", "risk factors"],
-        "item_7": ["item 7.", "item7.", "management"],
+        "item_7":  ["item 7.", "item7.", "management"],
         "item_7a": ["item 7a.", "item7a.", "quantitative"],
-    }
+    },
+    # 10-Q quarterly report
+    "10-Q": {
+        "item_1": ["item 1.", "item1.", "financial statements"],
+        "item_2": ["item 2.", "item2.", "management"],
+        "item_3": ["item 3.", "item3.", "quantitative"],
+    },
+    # 20-F annual report for foreign private issuers
+    # Item 4 = Information on the Company (business description, branding, marketing)
+    # Item 5 = MD&A
+    # Item 11 = Quantitative/Qualitative Market Risk
+    "20-F": {
+        "item_4":  ["item 4.", "item4.", "information on the company"],
+        "item_4a": ["item 4a.", "item4a.", "unresolved staff comments"],
+        "item_5":  ["item 5.", "item5.", "operating and financial"],
+        "item_11": ["item 11.", "item11.", "quantitative and qualitative"],
+    },
+    # 6-K current report for foreign private issuers
+    "6-K": {
+        "item_1": ["item 1.", "item1.", "report"],
+    },
+    # 8-K current report
+    "8-K": {
+        "item_1": ["item 1.", "item1.", "entry into"],
+        "item_2": ["item 2.", "item2.", "results of operations"],
+        "item_7": ["item 7.", "item7.", "financial statements"],
+        "item_9": ["item 9.", "item9.", "regulation fd"],
+    },
+}
+
+
+def _target_items_for_form(form_type: str) -> dict:
+    form_upper = (form_type or "").upper().strip()
+    for key in _SECTION_TARGETS:
+        if key in form_upper:
+            return _SECTION_TARGETS[key]
+    return _SECTION_TARGETS["10-K"]
+
+
+def _extract_sections(filing, form_type: str = "") -> dict:
+    target_items = _target_items_for_form(form_type)
+    sections = {}
 
     try:
         # Try structured document access first
@@ -276,17 +351,18 @@ def _extract_sections(filing) -> dict:
         try:
             html = filing.html() if hasattr(filing, "html") else ""
             if html:
-                import re
-                text = re.sub(r"<[^>]+>", " ", html)
-                text = re.sub(r"\s+", " ", text)
-                sections = _parse_sections_from_text(text, target_items)
+                sections = _parse_sections_from_text(
+                    _strip_html(html), target_items
+                )
         except Exception:
             pass
 
     if not any(sections.values()):
         try:
             txt = filing.text() if hasattr(filing, "text") else ""
-            sections = _parse_sections_from_text(txt, target_items)
+            sections = _parse_sections_from_text(
+                _strip_html(txt), target_items
+            )
         except Exception:
             pass
 
@@ -301,32 +377,127 @@ def _filing_acceptance_datetime(filing) -> str:
     return ""
 
 
+def _strip_html(raw: str) -> str:
+    """
+    Convert HTML to plain text while preserving block-level structure.
+    Block-level tags (p, div, br, h1-h6, tr, li) become newlines so that
+    section headers — which are their own block — appear on their own line.
+    Inline tags become spaces. HTML entities are decoded.
+    Non-breaking spaces become regular spaces.
+    """
+    import re
+    import html as html_lib
+
+    # Block tags → newline
+    raw = re.sub(
+        r"</?(?:p|div|br|h[1-6]|tr|li|section|article|header|footer|table|thead|tbody)[^>]*>",
+        "\n", raw, flags=re.IGNORECASE,
+    )
+    raw = re.sub(r"<[^>]+>", " ", raw)          # remaining tags → space
+    raw = html_lib.unescape(raw)                 # &amp; &#160; etc.
+    raw = re.sub(r"[\xa0\u00a0\u2009\u200a]+", " ", raw)  # NBSP variants
+    raw = re.sub(r"[ \t]+", " ", raw)            # collapse horizontal whitespace
+    raw = re.sub(r"\n{3,}", "\n\n", raw)         # max double newline
+    return raw.strip()
+
+
+def _all_occurrences(text: str, text_lower: str, keywords: list[str]) -> list[int]:
+    """
+    Return all positions where any keyword appears at the START of a line
+    (preceded by a newline or the document start, with optional leading spaces).
+    Falls back to any occurrence if no line-start match is found.
+    """
+    import re
+    for kw in keywords:
+        # Try line-anchored: newline + optional spaces + keyword (case-insensitive)
+        pattern = re.compile(r"(?:^|\n) *" + re.escape(kw), re.IGNORECASE)
+        positions = [m.start() for m in pattern.finditer(text)]
+        # Adjust to the keyword start (skip the newline + spaces)
+        adjusted = []
+        for p in positions:
+            # Find the actual keyword start within the match
+            match_text = text[p:p + len(kw) + 5].lower()
+            offset = match_text.find(kw.lower())
+            if offset != -1:
+                adjusted.append(p + offset)
+        if adjusted:
+            return adjusted
+    # Fallback: any occurrence
+    for kw in keywords:
+        positions = []
+        start = 0
+        while True:
+            idx = text_lower.find(kw, start)
+            if idx == -1:
+                break
+            positions.append(idx)
+            start = idx + 1
+        if positions:
+            return positions
+    return []
+
+
 def _parse_sections_from_text(text: str, target_items: dict) -> dict:
+    """
+    Extract named sections from a filing's raw text.
+
+    SEC filings have a Table of Contents near the top AND cross-references
+    scattered throughout the body — so each item keyword (e.g. "item 4.")
+    can appear dozens of times.  A naive .find() picks the TOC entry (tiny
+    span).  A "max total span" heuristic picks a cross-reference inside
+    another section whose body has no other markers for a while.
+
+    Correct strategy: for each item key, measure the span from each
+    candidate occurrence to the nearest occurrence of a *different* item
+    key.  Cross-references within a section body say things like
+    "see Item 4.A." while still inside Item 5 — those "item 4." hits are
+    followed very quickly by the next "item 4." or "item 5." reference.
+    The real section header is followed by thousands of chars before any
+    OTHER item's header appears.
+    """
     sections: dict[str, str] = {}
     text_lower = text.lower()
 
-    item_keys = list(target_items.keys())
-    markers = [(key, kws) for key, kws in target_items.items()]
+    # Collect all positions per key (line-anchored preferred)
+    all_occ: dict[str, list[int]] = {
+        key: _all_occurrences(text, text_lower, kws)
+        for key, kws in target_items.items()
+    }
 
-    # Find positions of each section marker
-    positions: dict[str, int] = {}
-    for key, keywords in markers:
-        for kw in keywords:
-            idx = text_lower.find(kw)
-            if idx != -1:
-                positions[key] = idx
-                break
+    def _next_different_marker(pos: int, current_key: str) -> int:
+        """Nearest position of any item OTHER than current_key that comes after pos."""
+        nearest = len(text)
+        for other_key, occ_list in all_occ.items():
+            if other_key == current_key:
+                continue
+            for p in occ_list:
+                if pos < p < nearest:
+                    nearest = p
+        return nearest
 
-    sorted_keys = sorted(positions.keys(), key=lambda k: positions[k])
+    # For each key, pick the occurrence with the longest span to the
+    # nearest OTHER-item marker.  That is the actual section body.
+    best_positions: dict[str, int] = {}
+    for key, occ_list in all_occ.items():
+        if not occ_list:
+            continue
+        best_pos = occ_list[0]
+        best_span = 0
+        for pos in occ_list:
+            span = _next_different_marker(pos, key) - pos
+            if span > best_span:
+                best_span = span
+                best_pos = pos
+        if best_span >= 200:
+            best_positions[key] = best_pos
+
+    sorted_keys = sorted(best_positions.keys(), key=lambda k: best_positions[k])
 
     for i, key in enumerate(sorted_keys):
-        start = positions[key]
-        end = positions[sorted_keys[i + 1]] if i + 1 < len(sorted_keys) else len(text)
-        section_text = text[start:end].strip()
-        # Cap at ~50k chars to avoid blowing up memory
-        sections[key] = section_text[:50000]
+        start = best_positions[key]
+        end = best_positions[sorted_keys[i + 1]] if i + 1 < len(sorted_keys) else len(text)
+        sections[key] = text[start:end].strip()[:SECTION_CHAR_LIMIT]
 
-    # Fill missing with empty
     for key in target_items:
         if key not in sections:
             sections[key] = ""

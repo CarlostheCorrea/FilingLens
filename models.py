@@ -121,6 +121,7 @@ class WorkflowAnswerResponse(BaseModel):
     proposal_id: str
     query: str
     from_cache: bool = False
+    retrieval_version: str = ""
     workflow: WorkflowMetadata
     answer: StructuredAnswerPayload
 
@@ -166,6 +167,12 @@ class ChunkMetadata(BaseModel):
     filing_date: str
     item_section: str
     chunk_index: int
+    section_window_index: Optional[int] = None
+    section_focus_hint: Optional[str] = None
+    source_char_start: Optional[int] = None
+    source_char_end: Optional[int] = None
+    section_text_digest: Optional[str] = None
+    vector_schema_version: Optional[str] = None
 
 
 class Chunk(BaseModel):
@@ -235,10 +242,66 @@ class FilingEvent(BaseModel):
 class CompareResponse(BaseModel):
     compare_run_id: str
     from_cache: bool = False
+    retrieval_version: str = ""
     companies: list[Company]
     overall_summary: str
     company_comparisons: list[CompanyComparison] = Field(default_factory=list)
     similarities: list[str] = Field(default_factory=list)
     differences: list[str] = Field(default_factory=list)
+    stock_series: list[StockSeries] = Field(default_factory=list)
+    filing_events: list[FilingEvent] = Field(default_factory=list)
+
+
+class ChangeIntelligenceRequest(BaseModel):
+    ticker: str
+    query: str
+    form_types: list[str]
+    filing_date_range: list[str]
+    max_filings: int = 3
+    price_lookback: str = "3M"
+
+
+class ChangeEvidenceItem(BaseModel):
+    chunk_id: str
+    excerpt: str
+    accession_number: str
+    cik: str
+    form_type: str
+    filing_date: str
+    item_section: str
+    sec_url: str
+
+
+class FilingComparisonWindow(BaseModel):
+    window_id: str
+    label: str
+    before_filing: Filing
+    after_filing: Filing
+    summary: str = ""
+    gaps: list[str] = Field(default_factory=list)
+
+
+class ChangeCard(BaseModel):
+    change_id: str
+    window_id: str
+    category: str
+    summary: str
+    importance: str
+    confidence: str
+    before_filing: Filing
+    after_filing: Filing
+    before_evidence: list[ChangeEvidenceItem] = Field(default_factory=list)
+    after_evidence: list[ChangeEvidenceItem] = Field(default_factory=list)
+    sec_urls: list[str] = Field(default_factory=list)
+
+
+class ChangeIntelligenceResponse(BaseModel):
+    change_run_id: str
+    from_cache: bool = False
+    retrieval_version: str = ""
+    company: Company
+    overall_summary: str
+    comparison_windows: list[FilingComparisonWindow] = Field(default_factory=list)
+    change_cards: list[ChangeCard] = Field(default_factory=list)
     stock_series: list[StockSeries] = Field(default_factory=list)
     filing_events: list[FilingEvent] = Field(default_factory=list)

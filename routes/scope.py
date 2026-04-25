@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from models import ProposeRequest, ApprovedScope, ScopeProposal, ManualScopeRequest
 from services.scope_service import create_proposal, approve_scope, create_manual_scope
+from edgar_client import resolve_ticker_to_cik
 
 router = APIRouter(prefix="/api/scope", tags=["scope"])
 
@@ -28,3 +29,16 @@ async def manual(req: ManualScopeRequest):
         return create_manual_scope(req)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/resolve/{ticker}")
+async def resolve_ticker(ticker: str):
+    """Resolve a ticker symbol to company name and CIK."""
+    info = resolve_ticker_to_cik(ticker.strip().upper()) or {}
+    return {
+        "ticker": ticker.strip().upper(),
+        "name": info.get("name", ticker.strip().upper()),
+        "cik": info.get("cik", ""),
+        "sic": info.get("sic", ""),
+        "found": bool(info.get("cik", "")),
+    }

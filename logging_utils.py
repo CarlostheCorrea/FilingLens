@@ -72,3 +72,40 @@ def log_compare(compare_run_id: str, tickers: list[str], filing_events: list, co
         "company_count": company_count,
         "filing_events_count": len(filing_events),
     })
+
+
+def log_change_intelligence(change_run_id: str, ticker: str, comparison_windows: int, change_cards: int):
+    _log("change_intelligence", {
+        "change_run_id": change_run_id,
+        "ticker": ticker,
+        "comparison_windows": comparison_windows,
+        "change_cards": change_cards,
+    })
+
+
+def log_section_focus(
+    accession_number: str,
+    item_section: str,
+    windows_kept: list[dict],
+    top_scores: list[float],
+):
+    _log("section_focus", {
+        "accession_number": accession_number,
+        "item_section": item_section,
+        "windows_kept": windows_kept,
+        "top_scores": top_scores,
+    })
+
+
+def log_vector_refresh(
+    proposal_id: str | None,
+    accession_number: str,
+    status: str,
+    reason: str,
+):
+    _log("vector_refresh", {
+        "proposal_id": proposal_id,
+        "accession_number": accession_number,
+        "status": status,
+        "reason": reason,
+    })

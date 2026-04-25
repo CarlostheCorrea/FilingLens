@@ -16,6 +16,12 @@ const state = {
   compareFormTypes: ['10-K', '10-Q', '8-K', '20-F', '6-K'],
   compareDateRange: ['', ''],
   compareLookback: '3M',
+  change: null,
+  changeChart: null,
+  changeFormTypes: ['10-K', '10-Q'],
+  changeDateRange: ['', ''],
+  changeLookback: '3M',
+  changeWindowId: '',
   manualTickers: [],   // Manual tab tickers
   manualFormTypes: ['10-K', '10-Q'],
   manualDateRange: ['', ''],
@@ -33,6 +39,30 @@ const PRESETS = {
 const $ = id => document.getElementById(id);
 const show = id => $(id) && $(id).classList.remove('hidden');
 const hide = id => $(id) && $(id).classList.add('hidden');
+
+function switchMode(mode) {
+  const researchEl = $('research-mode');
+  const compareEl = $('compare-mode');
+  const changeEl = $('change-mode');
+  const btnResearch = $('mode-btn-research');
+  const btnCompare = $('mode-btn-compare');
+  const btnChange = $('mode-btn-change');
+  const tagline = $('mode-tagline');
+
+  if (researchEl) researchEl.classList.toggle('hidden', mode !== 'research');
+  if (compareEl)  compareEl.classList.toggle('hidden', mode !== 'compare');
+  if (changeEl) changeEl.classList.toggle('hidden', mode !== 'change');
+  if (btnResearch) btnResearch.classList.toggle('active', mode === 'research');
+  if (btnCompare)  btnCompare.classList.toggle('active', mode === 'compare');
+  if (btnChange)  btnChange.classList.toggle('active', mode === 'change');
+  if (tagline) {
+    tagline.textContent = mode === 'research'
+      ? 'Ask questions across SEC filings for a set of companies'
+      : mode === 'compare'
+      ? 'Side-by-side analysis of two companies using their filings'
+      : 'Track how one company’s filing language changes across time';
+  }
+}
 
 function normalizeCik(cikOrAccession) {
   const raw = String(cikOrAccession || '').split('-')[0].trim();
@@ -98,6 +128,146 @@ function formatPercent(value) {
 
 function compareEventId(event) {
   return `${event.ticker}-${event.accession_number}`;
+}
+
+/* ═══════════════════════════════════════════
+   ANALYST LIBRARY
+   ═══════════════════════════════════════════ */
+function toggleLibraryPanel() {
+  const body = $('library-body');
+  const chevron = $('library-chevron');
+  const isHidden = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !isHidden);
+  chevron.textContent = isHidden ? '▲' : '▼';
+  if (isHidden) loadLibrary();
+}
+
+async function loadLibrary() {
+  try {
+    const res = await fetch('/api/library');
+    if (!res.ok) return;
+    const entries = await res.json();
+    renderLibrary(entries);
+  } catch (_) {}
+}
+
+function renderLibrary(entries) {
+  const badge = $('library-count-badge');
+  if (entries.length) {
+    badge.textContent = entries.length;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+
+  const list = $('library-list');
+  if (!entries.length) {
+    list.innerHTML = '<div class="empty-state">No saved analysts yet. Run an ingestion, then save it below.</div>';
+    return;
+  }
+  list.innerHTML = entries.map(entry => {
+    const date = entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '';
+    const tickers = (entry.companies || []).map(c => c.ticker).join(', ');
+    const filingCount = (entry.filings || []).length;
+    return `
+      <div class="library-entry" id="lib-entry-${entry.id}">
+        <div class="library-entry-main">
+          <div class="library-entry-name">${entry.name}</div>
+          <div class="library-entry-meta">${tickers} &bull; ${entry.form_types?.join(', ') || ''} &bull; ${filingCount} filing${filingCount !== 1 ? 's' : ''} &bull; saved ${date}</div>
+        </div>
+        <div class="library-entry-actions">
+          <button class="btn btn-sm btn-primary" onclick="loadAnalyst('${entry.id}')">&#9654; Load</button>
+          <button class="btn btn-sm btn-ghost" onclick="deleteAnalyst('${entry.id}', '${entry.name.replace(/'/g, "\\'")}')">&#x2715;</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function saveAnalyst() {
+  const name = $('library-name-input').value.trim();
+  if (!name) { alert('Enter a name for this analyst.'); return; }
+  if (!state.proposalId) { alert('No active ingestion session to save.'); return; }
+
+  const statusEl = $('library-save-status');
+  statusEl.textContent = 'Saving…';
+  statusEl.className = 'library-save-status';
+  statusEl.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/library/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposal_id: state.proposalId, name }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    $('library-name-input').value = '';
+    statusEl.textContent = `✓ Saved as "${name}"`;
+    statusEl.className = 'library-save-status success';
+    log(`Analyst saved: ${name}`, 'success');
+    // Refresh the library panel count badge quietly
+    loadLibrary();
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.className = 'library-save-status error';
+  }
+}
+
+async function loadAnalyst(analystId) {
+  try {
+    const res = await fetch(`/api/library/load/${analystId}`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    const entry = await res.json();
+
+    // Restore scope state
+    state.proposalId = entry.proposal_id;
+    state.companies  = entry.companies || [];
+    state.formTypes  = entry.form_types || [];
+    state.dateRange  = entry.date_range || ['', ''];
+
+    log(`Loaded analyst: ${entry.name}`, 'success');
+
+    if (entry.vectors_present) {
+      // Vectors still on disk — skip re-ingestion, go straight to questions
+      renderIngestionResults({
+        filings_ingested: (entry.filings || []).length,
+        chunks_created: 0,
+        filings: entry.filings || [],
+        issues: [],
+        errors: [],
+      });
+      show('ingestion-panel');
+      log(`Vectors present — skipping re-ingestion for "${entry.name}"`, 'info');
+    } else {
+      // Vectors gone — show panel with re-ingest prompt
+      show('ingestion-panel');
+      hide('ingestion-results');
+      show('ingestion-progress');
+      hide('ask-question-area');
+      $('ingestion-badge').textContent = 'Re-ingest Needed';
+      $('ingestion-badge').className = 'badge badge-yellow';
+      $('ingestion-status-text').innerHTML =
+        `Vectors for <strong>${entry.name}</strong> were cleared. ` +
+        `<button class="btn btn-sm btn-primary" style="margin-left:8px" onclick="runIngestion()">Re-ingest Now</button>`;
+      log(`Vectors cleared — re-ingest needed for "${entry.name}"`, 'warn');
+    }
+
+    $('ingestion-panel').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    log('Load analyst error: ' + err.message, 'error');
+  }
+}
+
+async function deleteAnalyst(analystId, name) {
+  if (!confirm(`Remove analyst "${name}" from library? This does not delete the indexed vectors.`)) return;
+  try {
+    const res = await fetch(`/api/library/${analystId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    log(`Analyst removed: ${name}`, 'warn');
+    loadLibrary();
+  } catch (err) {
+    log('Delete analyst error: ' + err.message, 'error');
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -333,14 +503,40 @@ function removeCompany(idx) {
   log(`Removed ${r.ticker} from scope`, 'warn');
 }
 
-function addCompany() {
+async function addCompany() {
   const ticker = $('add-ticker-input').value.trim().toUpperCase();
   if (!ticker) return;
   if (state.companies.find(c => c.ticker === ticker)) { alert(`${ticker} already in scope.`); return; }
-  state.companies.push({ ticker, name: ticker, cik: '', rationale: 'Manually added.' });
+
   $('add-ticker-input').value = '';
+  // Optimistically add with empty CIK while resolving
+  state.companies.push({ ticker, name: ticker, cik: '', rationale: 'Resolving…' });
   renderCompanyGrid();
-  log(`Added ${ticker} to scope`, 'success');
+
+  try {
+    const res = await fetch(`/api/scope/resolve/${encodeURIComponent(ticker)}`);
+    const info = res.ok ? await res.json() : {};
+    const idx = state.companies.findIndex(c => c.ticker === ticker);
+    if (idx !== -1) {
+      state.companies[idx] = {
+        ticker,
+        name: info.name || ticker,
+        cik: info.cik || '',
+        rationale: info.found ? 'Manually added.' : 'CIK not found — will be skipped during ingestion.',
+      };
+      renderCompanyGrid();
+      if (info.found) {
+        log(`Added ${ticker} (${info.name}) — CIK resolved`, 'success');
+      } else {
+        log(`Added ${ticker} — WARNING: CIK not found, will be skipped during ingestion`, 'warn');
+      }
+    }
+  } catch (_) {
+    const idx = state.companies.findIndex(c => c.ticker === ticker);
+    if (idx !== -1) state.companies[idx].rationale = 'Manually added (CIK unresolved).';
+    renderCompanyGrid();
+    log(`Added ${ticker} — could not resolve CIK`, 'warn');
+  }
 }
 
 function rejectScope() {
@@ -620,10 +816,28 @@ function renderAnswer(data) {
   }
 }
 
+function buildEvidenceDisclosure(items, label, emptyLabel = '') {
+  if (!items || !items.length) {
+    return emptyLabel ? `<p class="evidence-empty-note">${emptyLabel}</p>` : '';
+  }
+
+  return `
+    <details class="evidence-disclosure">
+      <summary class="evidence-disclosure-summary">
+        <span>&#128269; ${label}</span>
+        <span class="evidence-disclosure-count">${items.length}</span>
+      </summary>
+      <div class="evidence-disclosure-body">
+        ${items.join('')}
+      </div>
+    </details>
+  `;
+}
+
 function buildCompanyDeepDiveCard(dive) {
   const statusClass = dive.status === 'supported' ? 'deep-dive-supported' : 'deep-dive-insufficient';
   const statusLabel = dive.status === 'supported' ? 'Supported' : 'Insufficient Evidence';
-  const evidence = (dive.evidence || []).map(item => {
+  const evidenceItems = (dive.evidence || []).map(item => {
     const url = edgarUrl(item.cik, item.accession_number);
     const link = url
       ? `<a class="sec-link" href="${url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>`
@@ -637,7 +851,8 @@ function buildCompanyDeepDiveCard(dive) {
         <div class="deep-dive-evidence-text">${item.excerpt}</div>
       </div>
     `;
-  }).join('');
+  });
+  const evidence = buildEvidenceDisclosure(evidenceItems, 'Show evidence excerpts');
 
   const gaps = (dive.gaps || []).map(gap => `<li>${gap}</li>`).join('');
 
@@ -651,7 +866,7 @@ function buildCompanyDeepDiveCard(dive) {
         <span class="deep-dive-status">${statusLabel}</span>
       </div>
       <p class="deep-dive-summary">${dive.summary || ''}</p>
-      ${evidence ? `<div class="deep-dive-evidence-list">${evidence}</div>` : ''}
+      ${evidence}
       ${gaps ? `<ul class="deep-dive-gaps">${gaps}</ul>` : ''}
     </article>
   `;
@@ -874,7 +1089,7 @@ function renderCompare(data) {
 function buildCompareCompanyCard(comparison) {
   const statusClass = comparison.status === 'supported' ? 'deep-dive-supported' : 'deep-dive-insufficient';
   const statusLabel = comparison.status === 'supported' ? 'Supported' : 'Insufficient Evidence';
-  const evidence = (comparison.evidence || []).map(item => `
+  const evidenceItems = (comparison.evidence || []).map(item => `
     <div class="deep-dive-evidence-item">
       <div class="deep-dive-evidence-meta">
         ${comparison.ticker} &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
@@ -882,7 +1097,8 @@ function buildCompareCompanyCard(comparison) {
       </div>
       <div class="deep-dive-evidence-text">${item.excerpt}</div>
     </div>
-  `).join('');
+  `);
+  const evidence = buildEvidenceDisclosure(evidenceItems, 'Show evidence excerpts');
   const gaps = (comparison.gaps || []).map(gap => `<li>${gap}</li>`).join('');
 
   return `
@@ -895,7 +1111,7 @@ function buildCompareCompanyCard(comparison) {
         <span class="deep-dive-status">${statusLabel}</span>
       </div>
       <p class="deep-dive-summary">${comparison.summary || ''}</p>
-      ${evidence ? `<div class="deep-dive-evidence-list">${evidence}</div>` : ''}
+      ${evidence}
       ${gaps ? `<ul class="deep-dive-gaps">${gaps}</ul>` : ''}
     </article>
   `;
@@ -998,7 +1214,7 @@ function showCompareEventDetail(eventId) {
   if (!event) return;
 
   const detail = $('compare-event-detail');
-  const excerpts = (event.supporting_excerpts || []).map(item => `
+  const excerptItems = (event.supporting_excerpts || []).map(item => `
     <div class="deep-dive-evidence-item">
       <div class="deep-dive-evidence-meta">
         ${event.ticker} &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
@@ -1006,7 +1222,12 @@ function showCompareEventDetail(eventId) {
       </div>
       <div class="deep-dive-evidence-text">${item.excerpt}</div>
     </div>
-  `).join('');
+  `);
+  const excerpts = buildEvidenceDisclosure(
+    excerptItems,
+    'Show event evidence',
+    'No compare excerpts from this filing were selected for the strategy summary.'
+  );
 
   detail.innerHTML = `
     <div class="compare-event-detail-header">
@@ -1022,9 +1243,374 @@ function showCompareEventDetail(eventId) {
       <span>+30D ${formatPercent(event.return_30d)}</span>
     </div>
     ${event.acceptance_datetime ? `<div class="compare-acceptance-time">Accepted: ${event.acceptance_datetime}</div>` : ''}
-    ${excerpts ? `<div class="deep-dive-evidence-list">${excerpts}</div>` : '<p class="compare-empty-note">No compare excerpts from this filing were selected for the strategy summary.</p>'}
+    ${excerpts}
   `;
   show('compare-event-detail');
+}
+
+/* ═══════════════════════════════════════════
+   CHANGE INTELLIGENCE
+   ═══════════════════════════════════════════ */
+function toggleChangeForm(chip) {
+  const type = chip.dataset.type;
+  chip.classList.toggle('active');
+  if (chip.classList.contains('active')) {
+    if (!state.changeFormTypes.includes(type)) state.changeFormTypes.push(type);
+  } else {
+    state.changeFormTypes = state.changeFormTypes.filter(t => t !== type);
+  }
+}
+
+function setChangeTimePreset(years) {
+  const startId = 'change-date-start';
+  const endId = 'change-date-end';
+  if (years === 'custom') {
+    $(startId).focus();
+  } else {
+    $(startId).value = yearsAgo(years);
+    $(endId).value = today();
+    state.changeDateRange = [$(startId).value, $(endId).value];
+  }
+  $('change-time-presets').querySelectorAll('.time-preset-btn').forEach(btn => {
+    btn.classList.toggle('active',
+      (years === 'custom' && btn.textContent === 'Custom') ||
+      (years !== 'custom' && btn.textContent === `${years}Y`)
+    );
+  });
+}
+
+function setChangeLookback(lookback) {
+  state.changeLookback = lookback;
+  $('change-lookback-presets').querySelectorAll('.time-preset-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.toUpperCase() === lookback.toUpperCase());
+  });
+}
+
+async function runChangeIntelligence(forceRefresh = false) {
+  const ticker = $('change-ticker').value.trim().toUpperCase();
+  const query = $('change-query-input').value.trim();
+  const filingDateRange = [
+    $('change-date-start').value,
+    $('change-date-end').value,
+  ];
+  const maxFilings = Number.parseInt($('change-max-filings').value, 10) || 3;
+
+  if (!ticker) {
+    alert('Enter a ticker symbol.');
+    return;
+  }
+  if (!query) {
+    alert('Enter a change lens or analysis question.');
+    return;
+  }
+  if (!state.changeFormTypes.length) {
+    alert('Select at least one filing type.');
+    return;
+  }
+  if (!filingDateRange[0] || !filingDateRange[1]) {
+    alert('Choose a filing date range.');
+    return;
+  }
+
+  show('change-results-panel');
+  show('change-loading');
+  hide('change-summary-section');
+  hide('change-timeline-section');
+  hide('change-cards-section');
+  hide('change-chart-section');
+  hide('change-events-section');
+  hide('change-cached-badge');
+  $('change-status').textContent = 'Running change intelligence…';
+  $('change-results-panel').scrollIntoView({ behavior: 'smooth' });
+  log(`Running change intelligence for ${ticker}${forceRefresh ? ' (refresh)' : ''}…`, 'info');
+
+  try {
+    const res = await fetch(`/api/change-intelligence${forceRefresh ? '?refresh=true' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticker,
+        query,
+        form_types: state.changeFormTypes,
+        filing_date_range: filingDateRange,
+        max_filings: maxFilings,
+        price_lookback: state.changeLookback,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    const data = await res.json();
+    state.change = data;
+    state.changeWindowId = (data.comparison_windows || [])[0]?.window_id || '';
+    $('change-status').textContent = '';
+
+    if (data.from_cache) {
+      show('change-cached-badge');
+      log(`Change intelligence served from cache for ${ticker}`, 'success');
+    } else {
+      hide('change-cached-badge');
+      log(`Change intelligence complete: ${data.change_cards.length} change cards across ${data.comparison_windows.length} windows`, 'success');
+    }
+    renderChangeIntelligence(data);
+  } catch (err) {
+    hide('change-loading');
+    $('change-status').textContent = '';
+    log('Change intelligence error: ' + err.message, 'error');
+  }
+}
+
+function renderChangeIntelligence(data) {
+  hide('change-loading');
+
+  $('change-overall-summary').textContent = data.overall_summary || '';
+  show('change-summary-section');
+
+  const filingEvents = data.filing_events || [];
+  if (filingEvents.length) {
+    $('change-filings-list').innerHTML = filingEvents
+      .slice()
+      .sort((a, b) => (a.filing_date < b.filing_date ? 1 : -1))
+      .map(event => {
+        const url = event.sec_url || edgarUrl(event.cik, event.accession_number);
+        const link = url
+          ? `<a class="sec-link" href="${url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>`
+          : '';
+        return `
+          <div class="change-filing-row">
+            <span class="change-filing-type">${event.form_type || '—'}</span>
+            <span class="change-filing-date">${event.filing_date || '—'}</span>
+            <span class="change-filing-accession">${event.accession_number || ''}</span>
+            ${link}
+          </div>
+        `;
+      }).join('');
+    show('change-filings-section');
+  } else {
+    hide('change-filings-section');
+  }
+
+  const windows = data.comparison_windows || [];
+  $('change-window-selector').innerHTML = windows.map(window => `
+    <button class="change-window-chip ${state.changeWindowId === window.window_id ? 'active' : ''}" onclick="selectChangeWindow('${window.window_id}')">
+      ${window.label}
+    </button>
+  `).join('');
+  if (windows.length) show('change-timeline-section');
+  else hide('change-timeline-section');
+
+  renderChangeCards();
+  renderChangeChart(data.stock_series || [], data.filing_events || []);
+  if ((data.stock_series || []).length) show('change-chart-section');
+  else hide('change-chart-section');
+
+  renderChangeEvents();
+}
+
+function selectChangeWindow(windowId) {
+  state.changeWindowId = windowId;
+  renderChangeCards();
+  renderChangeEvents();
+  const windows = state.change?.comparison_windows || [];
+  $('change-window-selector').innerHTML = windows.map(window => `
+    <button class="change-window-chip ${state.changeWindowId === window.window_id ? 'active' : ''}" onclick="selectChangeWindow('${window.window_id}')">
+      ${window.label}
+    </button>
+  `).join('');
+}
+
+function renderChangeCards() {
+  const data = state.change;
+  if (!data) return;
+  const cards = (data.change_cards || []).filter(card => !state.changeWindowId || card.window_id === state.changeWindowId);
+  if (!cards.length) {
+    $('change-cards-list').innerHTML = '<div class="empty-state">No filing-backed changes were detected for the selected window.</div>';
+  } else {
+    $('change-cards-list').innerHTML = cards.map(buildChangeCard).join('');
+  }
+  show('change-cards-section');
+}
+
+function buildChangeCard(card) {
+  const categoryLabel = card.category.replace(/_/g, ' ');
+  const beforeEvidence = buildEvidenceDisclosure(
+    (card.before_evidence || []).map(item => `
+      <div class="deep-dive-evidence-item">
+        <div class="deep-dive-evidence-meta">
+          Before &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
+          <a class="sec-link" href="${item.sec_url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>
+        </div>
+        <div class="deep-dive-evidence-text">${item.excerpt}</div>
+      </div>
+    `),
+    'Show before evidence'
+  );
+  const afterEvidence = buildEvidenceDisclosure(
+    (card.after_evidence || []).map(item => `
+      <div class="deep-dive-evidence-item">
+        <div class="deep-dive-evidence-meta">
+          After &bull; ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
+          <a class="sec-link" href="${item.sec_url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>
+        </div>
+        <div class="deep-dive-evidence-text">${item.excerpt}</div>
+      </div>
+    `),
+    'Show after evidence'
+  );
+
+  return `
+    <article class="change-card">
+      <div class="change-card-header">
+        <div class="change-card-badges">
+          <span class="change-category-badge">${categoryLabel}</span>
+          <span class="change-importance-badge importance-${card.importance}">${card.importance}</span>
+          <span class="change-confidence-badge confidence-${card.confidence}">${card.confidence}</span>
+        </div>
+        <div class="change-card-range">${card.after_filing.form_type} ${card.after_filing.filing_date} vs ${card.before_filing.form_type} ${card.before_filing.filing_date}</div>
+      </div>
+      <p class="change-card-summary">${card.summary || ''}</p>
+      <div class="change-evidence-grid">
+        <div class="change-evidence-column">
+          <div class="compare-subtitle">Before</div>
+          ${beforeEvidence}
+        </div>
+        <div class="change-evidence-column">
+          <div class="compare-subtitle">After</div>
+          ${afterEvidence}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderChangeChart(stockSeries, filingEvents) {
+  if (state.changeChart) {
+    state.changeChart.destroy();
+    state.changeChart = null;
+  }
+  const canvas = $('change-stock-chart');
+  if (!canvas || typeof Chart === 'undefined' || !stockSeries.length) return;
+
+  const series = stockSeries[0];
+  const pointMap = new Map((series.points || []).map(point => [point.date, point.indexed_close]));
+  const lineDataset = {
+    type: 'line',
+    label: `${series.ticker} indexed`,
+    borderColor: '#2563eb',
+    backgroundColor: '#2563eb',
+    borderWidth: 2,
+    tension: 0.15,
+    pointRadius: 0,
+    data: (series.points || []).map(point => ({ x: point.date, y: point.indexed_close })),
+  };
+  const markerDataset = {
+    type: 'scatter',
+    label: `${series.ticker} filings`,
+    borderColor: '#d97706',
+    backgroundColor: '#d97706',
+    pointStyle: 'triangle',
+    pointRadius: 6,
+    pointHoverRadius: 7,
+    data: (filingEvents || [])
+      .map((event, eventIndex) => ({ event, eventIndex }))
+      .filter(({ event }) => event.trading_date && pointMap.has(event.trading_date))
+      .map(({ event, eventIndex }) => ({
+        x: event.trading_date,
+        y: pointMap.get(event.trading_date),
+        eventIndex,
+        label: `${event.form_type} ${event.filing_date}`,
+      })),
+    compareEventDataset: true,
+  };
+
+  state.changeChart = new Chart(canvas.getContext('2d'), {
+    data: { datasets: [lineDataset, markerDataset] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      scales: {
+        x: { type: 'category' },
+        y: { title: { display: true, text: 'Indexed Close (Start = 100)' } },
+      },
+      plugins: { legend: { position: 'bottom' } },
+      onClick(_event, elements, chart) {
+        if (!elements.length) return;
+        const element = elements[0];
+        const dataset = chart.data.datasets[element.datasetIndex];
+        if (!dataset.compareEventDataset) return;
+        const point = dataset.data[element.index];
+        if (point && Number.isInteger(point.eventIndex)) {
+          const eventRecord = (state.change?.filing_events || [])[point.eventIndex];
+          if (eventRecord) showChangeEventDetail(compareEventId(eventRecord));
+        }
+      },
+    },
+  });
+}
+
+function renderChangeEvents() {
+  const data = state.change;
+  if (!data) return;
+  const activeWindow = (data.comparison_windows || []).find(window => window.window_id === state.changeWindowId);
+  const allowedAccessions = new Set(
+    activeWindow ? [activeWindow.before_filing.accession_number, activeWindow.after_filing.accession_number] : []
+  );
+  const events = (data.filing_events || []).filter(event =>
+    !allowedAccessions.size || allowedAccessions.has(event.accession_number)
+  );
+  $('change-events-body').innerHTML = events.map(event => `
+    <tr onclick="showChangeEventDetail('${compareEventId(event)}')" class="compare-event-row">
+      <td>${event.form_type || '—'}</td>
+      <td>${event.filing_date || '—'}</td>
+      <td>${event.trading_date || '—'}</td>
+      <td class="${Number(event.return_1d) > 0 ? 'positive' : Number(event.return_1d) < 0 ? 'negative' : ''}">${formatPercent(event.return_1d)}</td>
+      <td class="${Number(event.return_5d) > 0 ? 'positive' : Number(event.return_5d) < 0 ? 'negative' : ''}">${formatPercent(event.return_5d)}</td>
+      <td class="${Number(event.return_30d) > 0 ? 'positive' : Number(event.return_30d) < 0 ? 'negative' : ''}">${formatPercent(event.return_30d)}</td>
+    </tr>
+  `).join('');
+  if (events.length) {
+    show('change-events-section');
+    showChangeEventDetail(compareEventId(events[0]));
+  } else {
+    hide('change-events-section');
+  }
+}
+
+function showChangeEventDetail(eventId) {
+  const events = state.change?.filing_events || [];
+  const event = events.find(item => compareEventId(item) === eventId);
+  if (!event) return;
+
+  const detail = $('change-event-detail');
+  const excerpts = buildEvidenceDisclosure(
+    (event.supporting_excerpts || []).map(item => `
+      <div class="deep-dive-evidence-item">
+        <div class="deep-dive-evidence-meta">
+          ${item.form_type} &bull; ${item.filing_date} &bull; ${item.item_section}
+          <a class="sec-link" href="${item.sec_url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>
+        </div>
+        <div class="deep-dive-evidence-text">${item.excerpt}</div>
+      </div>
+    `),
+    'Show event evidence',
+    'No change-evidence excerpts were attached to this filing.'
+  );
+
+  detail.innerHTML = `
+    <div class="compare-event-detail-header">
+      <div>
+        <div class="deep-dive-ticker">${state.change?.company?.ticker || ''}</div>
+        <div class="compare-event-meta">${event.form_type} filed ${event.filing_date}${event.trading_date ? ` • trading day ${event.trading_date}` : ''}</div>
+      </div>
+      <a class="sec-link" href="${event.sec_url}" target="_blank" rel="noopener noreferrer">View filing</a>
+    </div>
+    <div class="compare-return-strip">
+      <span>+1D ${formatPercent(event.return_1d)}</span>
+      <span>+5D ${formatPercent(event.return_5d)}</span>
+      <span>+30D ${formatPercent(event.return_30d)}</span>
+    </div>
+    ${excerpts}
+  `;
+  show('change-event-detail');
 }
 
 /* ═══════════════════════════════════════════
@@ -1115,13 +1701,19 @@ async function clearData() {
         state.proposalId = null;
         state.answer = null;
         state.compare = null;
+        state.change = null;
         if (state.compareChart) {
           state.compareChart.destroy();
           state.compareChart = null;
         }
+        if (state.changeChart) {
+          state.changeChart.destroy();
+          state.changeChart = null;
+        }
         hide('ingestion-panel');
         hide('answer-panel');
         hide('compare-results-panel');
+        hide('change-results-panel');
         hide('scope-panel');
       }
     }
@@ -1151,6 +1743,12 @@ async function clearData() {
   $('compare-date-start').value = compareStart;
   $('compare-date-end').value = compareEnd;
   state.compareDateRange = [compareStart, compareEnd];
+
+  const changeEnd = today();
+  const changeStart = yearsAgo(2);
+  $('change-date-start').value = changeStart;
+  $('change-date-end').value = changeEnd;
+  state.changeDateRange = [changeStart, changeEnd];
 })();
 
 /* ── Keyboard shortcuts ── */

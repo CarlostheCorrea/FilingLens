@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+
+  <!-- ═══ HEADER ═══ -->
   <header>
     <div class="header-inner">
       <div>
@@ -17,380 +19,585 @@
     </div>
   </header>
 
+  <!-- ═══ MODE BAR ═══ -->
+  <nav class="mode-bar">
+    <div class="mode-inner">
+      <button class="mode-btn active" id="mode-btn-research" onclick="switchMode('research')">
+        <span class="mode-icon">&#128202;</span>
+        <span>Market Analyst</span>
+      </button>
+      <div class="mode-divider"></div>
+      <button class="mode-btn" id="mode-btn-compare" onclick="switchMode('compare')">
+        <span class="mode-icon">&#9878;</span>
+        <span>Compare Two Companies</span>
+      </button>
+      <div class="mode-divider"></div>
+      <button class="mode-btn" id="mode-btn-change" onclick="switchMode('change')">
+        <span class="mode-icon">&#128260;</span>
+        <span>Filing Change Intelligence</span>
+      </button>
+      <p class="mode-tagline" id="mode-tagline">
+        Multi-company analysis &mdash; AI picks companies, ingests filings, generates citation-backed answers
+      </p>
+    </div>
+  </nav>
+
   <main class="layout">
     <section class="main-column">
 
-      <!-- ═══ TABBED ENTRY PANEL ═══ -->
-      <section class="card" id="entry-panel">
-        <div class="tab-nav">
-          <button class="tab-btn active" id="tab-btn-ai" onclick="switchTab('ai')">
-            &#129504; AI Research
-          </button>
-          <button class="tab-btn" id="tab-btn-manual" onclick="switchTab('manual')">
-            &#128203; Manual Selection
-          </button>
-        </div>
+      <!-- ══════════════════════════════════════════
+           RESEARCH MODE
+           ══════════════════════════════════════════ -->
+      <div id="research-mode">
 
-        <!-- ── Tab 1: AI Research ── -->
-        <div id="tab-ai" class="tab-content">
-          <p class="panel-desc">Describe what you want to research — the AI will propose which companies and filings to analyze.</p>
-          <textarea
-            id="query-input"
-            rows="3"
-            placeholder='e.g. "Which semiconductor companies flagged supply chain risk in their most recent 10-K?"'
-          ></textarea>
-          <div class="query-actions">
-            <button id="propose-btn" class="btn btn-primary" onclick="proposeScope()">Propose Scope</button>
-            <div id="query-status" class="status-text"></div>
-          </div>
-          <p class="tab-hint">&#8984;+Enter to propose &nbsp;&bull;&nbsp; AI picks companies via MCP &rarr; you review &rarr; ingest</p>
-        </div>
-
-        <!-- ── Tab 2: Manual Selection ── -->
-        <div id="tab-manual" class="tab-content hidden">
-          <p class="panel-desc">Enter tickers directly, pick filing types and a time frame — no AI needed.</p>
-
-          <!-- Ticker input -->
-          <div class="manual-section">
-            <label class="field-label">Add Tickers</label>
-            <div class="manual-ticker-row">
-              <input type="text" id="manual-ticker-input" placeholder="e.g. NVDA, AMD, TSLA" onkeydown="if(event.key==='Enter')addManualTickers()" />
-              <button class="btn btn-primary btn-sm" onclick="addManualTickers()">+ Add</button>
+        <!-- ── Analyst Library ── -->
+        <section class="card" id="library-panel">
+          <div class="library-header" onclick="toggleLibraryPanel()">
+            <div class="library-header-left">
+              <span class="library-icon">&#128218;</span>
+              <h3>My Analysts</h3>
+              <span id="library-count-badge" class="badge badge-blue hidden"></span>
             </div>
-            <p class="field-hint">Separate multiple tickers with commas or spaces</p>
+            <span id="library-chevron">&#9660;</span>
           </div>
-
-          <!-- Quick presets -->
-          <div class="manual-section">
-            <label class="field-label">Quick Presets</label>
-            <div class="preset-row">
-              <button class="preset-btn" onclick="addPreset('semis')">&#127758; Semiconductors</button>
-              <button class="preset-btn" onclick="addPreset('bigtech')">&#128187; Big Tech</button>
-              <button class="preset-btn" onclick="addPreset('ev')">&#9889; EV Makers</button>
-              <button class="preset-btn" onclick="addPreset('banks')">&#127970; Big Banks</button>
-              <button class="btn-clear-all" onclick="clearManualTickers()">Clear all</button>
+          <div id="library-body" class="hidden">
+            <p class="panel-desc" style="margin-bottom:12px">Save your current ingested scope as a named analyst to reload it instantly later — no re-ingestion needed while vectors are on disk.</p>
+            <div id="library-list" class="library-list">
+              <div class="empty-state">No saved analysts yet. Run an ingestion, then save it below.</div>
             </div>
           </div>
+        </section>
 
-          <!-- Ticker chips -->
-          <div id="manual-ticker-chips" class="manual-ticker-chips hidden"></div>
+        <!-- ── Entry Panel ── -->
+        <section class="card" id="entry-panel">
+          <div class="tab-nav">
+            <button class="tab-btn active" id="tab-btn-ai" onclick="switchTab('ai')">
+              &#129504; AI Research
+            </button>
+            <button class="tab-btn" id="tab-btn-manual" onclick="switchTab('manual')">
+              &#128203; Manual Selection
+            </button>
+          </div>
 
-          <!-- Form types -->
-          <div class="manual-section manual-row-2">
-            <div>
-              <label class="field-label">Filing Types</label>
-              <div class="form-type-chips" id="manual-form-types">
-                <span class="chip active" data-type="10-K" onclick="toggleManualForm(this)">10-K</span>
-                <span class="chip active" data-type="10-Q" onclick="toggleManualForm(this)">10-Q</span>
-                <span class="chip" data-type="8-K" onclick="toggleManualForm(this)">8-K</span>
-                <span class="chip" data-type="20-F" onclick="toggleManualForm(this)">20-F</span>
-                <span class="chip" data-type="6-K" onclick="toggleManualForm(this)">6-K</span>
+          <!-- Tab 1: AI Research -->
+          <div id="tab-ai" class="tab-content">
+            <p class="panel-desc">Describe what you want to research — the AI will propose which companies and filings to analyze.</p>
+            <textarea
+              id="query-input"
+              rows="3"
+              placeholder='e.g. "Which semiconductor companies flagged supply chain risk in their most recent 10-K?"'
+            ></textarea>
+            <div class="query-actions">
+              <button id="propose-btn" class="btn btn-primary" onclick="proposeScope()">Propose Scope</button>
+              <div id="query-status" class="status-text"></div>
+            </div>
+            <p class="tab-hint">&#8984;+Enter to propose &nbsp;&bull;&nbsp; AI picks companies via MCP &rarr; you review &rarr; ingest</p>
+          </div>
+
+          <!-- Tab 2: Manual Selection -->
+          <div id="tab-manual" class="tab-content hidden">
+            <p class="panel-desc">Enter tickers directly, pick filing types and a time frame — no AI needed.</p>
+
+            <div class="manual-section">
+              <label class="field-label">Add Tickers</label>
+              <div class="manual-ticker-row">
+                <input type="text" id="manual-ticker-input" placeholder="e.g. NVDA, AMD, TSLA" onkeydown="if(event.key==='Enter')addManualTickers()" />
+                <button class="btn btn-primary btn-sm" onclick="addManualTickers()">+ Add</button>
+              </div>
+              <p class="field-hint">Separate multiple tickers with commas or spaces</p>
+            </div>
+
+            <div class="manual-section">
+              <label class="field-label">Quick Presets</label>
+              <div class="preset-row">
+                <button class="preset-btn" onclick="addPreset('semis')">&#127758; Semiconductors</button>
+                <button class="preset-btn" onclick="addPreset('bigtech')">&#128187; Big Tech</button>
+                <button class="preset-btn" onclick="addPreset('ev')">&#9889; EV Makers</button>
+                <button class="preset-btn" onclick="addPreset('banks')">&#127970; Big Banks</button>
+                <button class="btn-clear-all" onclick="clearManualTickers()">Clear all</button>
               </div>
             </div>
-            <div>
-              <label class="field-label">Time Frame</label>
+
+            <div id="manual-ticker-chips" class="manual-ticker-chips hidden"></div>
+
+            <div class="manual-section manual-row-2">
+              <div>
+                <label class="field-label">Filing Types</label>
+                <div class="form-type-chips" id="manual-form-types">
+                  <span class="chip active" data-type="10-K" onclick="toggleManualForm(this)">10-K</span>
+                  <span class="chip active" data-type="10-Q" onclick="toggleManualForm(this)">10-Q</span>
+                  <span class="chip" data-type="8-K" onclick="toggleManualForm(this)">8-K</span>
+                  <span class="chip" data-type="20-F" onclick="toggleManualForm(this)">20-F</span>
+                  <span class="chip" data-type="6-K" onclick="toggleManualForm(this)">6-K</span>
+                </div>
+              </div>
+              <div>
+                <label class="field-label">Time Frame</label>
+                <div class="time-preset-row">
+                  <button class="time-preset-btn" onclick="setTimePreset(1, 'manual')">1Y</button>
+                  <button class="time-preset-btn" onclick="setTimePreset(2, 'manual')">2Y</button>
+                  <button class="time-preset-btn active" onclick="setTimePreset(3, 'manual')">3Y</button>
+                  <button class="time-preset-btn" onclick="setTimePreset('custom', 'manual')">Custom</button>
+                </div>
+                <div class="date-range-row" id="manual-date-row">
+                  <input type="date" id="manual-date-start" />
+                  <span>to</span>
+                  <input type="date" id="manual-date-end" />
+                </div>
+              </div>
+            </div>
+
+            <div class="manual-actions">
+              <button class="btn btn-primary" id="manual-ingest-btn" onclick="startManualIngest()">
+                Ingest Filings
+              </button>
+              <span id="manual-status" class="status-text"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── Scope Proposal ── -->
+        <section id="scope-panel" class="card hidden">
+          <div class="panel-header">
+            <h2>Scope Proposal</h2>
+            <span class="badge badge-blue">Checkpoint 1 &mdash; Review &amp; Edit</span>
+          </div>
+          <p class="panel-desc" id="scope-rationale"></p>
+
+          <div class="scope-meta">
+            <div class="meta-group">
+              <label>Filing Types</label>
+              <div id="form-types-editor"></div>
+            </div>
+            <div class="meta-group">
+              <label>Time Frame</label>
               <div class="time-preset-row">
-                <button class="time-preset-btn" onclick="setTimePreset(1, 'manual')">1Y</button>
-                <button class="time-preset-btn" onclick="setTimePreset(2, 'manual')">2Y</button>
-                <button class="time-preset-btn active" onclick="setTimePreset(3, 'manual')">3Y</button>
-                <button class="time-preset-btn" onclick="setTimePreset('custom', 'manual')">Custom</button>
+                <button class="time-preset-btn" onclick="setTimePreset(1,'scope')">1Y</button>
+                <button class="time-preset-btn" onclick="setTimePreset(2,'scope')">2Y</button>
+                <button class="time-preset-btn" onclick="setTimePreset(3,'scope')">3Y</button>
+                <button class="time-preset-btn" onclick="setTimePreset('custom','scope')">Custom</button>
               </div>
-              <div class="date-range-row" id="manual-date-row">
-                <input type="date" id="manual-date-start" />
+              <div class="date-range-row" style="margin-top:6px">
+                <input type="date" id="date-start" />
                 <span>to</span>
-                <input type="date" id="manual-date-end" />
+                <input type="date" id="date-end" />
+              </div>
+            </div>
+          </div>
+
+          <div class="companies-section">
+            <div class="companies-header">
+              <h3>Companies (<span id="company-count">0</span>)</h3>
+              <div class="add-company-row">
+                <input type="text" id="add-ticker-input" placeholder="Add ticker (e.g. NVDA)" onkeydown="if(event.key==='Enter')addCompany()" />
+                <button class="btn btn-sm" onclick="addCompany()">+ Add</button>
+              </div>
+            </div>
+            <div id="company-list" class="company-grid"></div>
+          </div>
+
+          <div class="scope-actions">
+            <button class="btn btn-primary" onclick="approveScope()">Approve &amp; Ingest Filings</button>
+            <button class="btn btn-ghost" onclick="rejectScope()">Reject &amp; Start Over</button>
+          </div>
+        </section>
+
+        <!-- ── Live Ingestion ── -->
+        <section id="ingestion-panel" class="card hidden">
+          <div class="panel-header">
+            <h2>Live Ingestion</h2>
+            <span class="badge badge-yellow" id="ingestion-badge">Running</span>
+          </div>
+          <div id="ingestion-progress" class="progress-area">
+            <div class="spinner"></div>
+            <p id="ingestion-status-text">Fetching filings from SEC EDGAR&hellip;</p>
+          </div>
+          <div id="ingestion-results" class="hidden">
+            <div class="ingestion-stats" id="ingestion-stats"></div>
+            <div id="filing-list" class="filing-list"></div>
+            <div id="ingestion-errors" class="error-list hidden"></div>
+            <div class="library-save-row">
+              <input id="library-name-input" type="text" placeholder="Name this analyst (e.g. Beer Industry 2Y)&hellip;" class="library-name-input" />
+              <button class="btn btn-ghost btn-sm" onclick="saveAnalyst()">&#128190; Save as Analyst</button>
+            </div>
+            <div id="library-save-status" class="library-save-status hidden"></div>
+          </div>
+
+          <div id="ask-question-area" class="hidden">
+            <div class="ask-header">
+              <h3>Ask a Research Question</h3>
+              <div id="scope-ticker-chips" class="scope-chips"></div>
+            </div>
+            <div id="history-section" class="hidden">
+              <div class="history-label">Past questions &mdash; click to re-use instantly</div>
+              <div id="history-list" class="history-list"></div>
+            </div>
+            <div class="ask-input-row">
+              <textarea id="answer-query-input" rows="2" placeholder="Enter your research question&hellip;"></textarea>
+            </div>
+            <div class="ask-actions">
+              <button class="btn btn-primary" onclick="generateAnswer(false)">Generate Answer</button>
+              <button class="btn btn-ghost btn-sm" onclick="generateAnswer(true)" title="Ignore cache and re-run">&#8635; Refresh</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── Research Answer ── -->
+        <section id="answer-panel" class="card hidden">
+          <div class="panel-header">
+            <h2>Research Answer</h2>
+            <span class="badge badge-green">Citation-Backed</span>
+            <span id="cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+            <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="generateAnswer(true)">&#8635; Re-run</button>
+          </div>
+          <div id="answer-loading" class="loading-area hidden">
+            <div class="spinner"></div>
+            <p>Retrieving relevant chunks and generating answer&hellip;</p>
+          </div>
+          <div id="overall-answer-section" class="hidden">
+            <h3>Overall Answer</h3>
+            <div class="overall-answer-card">
+              <p id="overall-answer-summary" class="overall-answer-summary"></p>
+              <ul id="overall-answer-points" class="overall-answer-points"></ul>
+            </div>
+          </div>
+          <div id="judge-section" class="hidden">
+            <div class="panel-header">
+              <h3>LLM Judge</h3>
+              <span class="badge badge-purple">Automated Review</span>
+            </div>
+            <div class="judge-card">
+              <div class="judge-header-row">
+                <div>
+                  <div id="judge-verdict" class="judge-verdict"></div>
+                  <p id="judge-summary" class="judge-summary"></p>
+                </div>
+                <div id="judge-overclaiming" class="judge-risk"></div>
+              </div>
+              <div id="judge-score-grid" class="judge-score-grid"></div>
+              <div class="judge-columns">
+                <div>
+                  <div class="compare-subtitle">Strengths</div>
+                  <ul id="judge-strengths" class="judge-list"></ul>
+                </div>
+                <div>
+                  <div class="compare-subtitle">Concerns</div>
+                  <ul id="judge-concerns" class="judge-list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="company-deep-dives-section" class="hidden">
+            <div class="panel-header">
+              <h3>Company Deep Dives</h3>
+              <span class="badge badge-blue">Question-Adaptive</span>
+            </div>
+            <div id="company-deep-dives-list" class="company-deep-dives-list"></div>
+          </div>
+          <div id="coverage-section" class="hidden">
+            <h3 class="gaps-title">Coverage Notes</h3>
+            <ul id="coverage-list" class="gaps-list"></ul>
+          </div>
+          <div id="claims-section" class="hidden">
+            <details id="claims-audit-details" class="claims-audit">
+              <summary class="claims-audit-summary">
+                <span>Claims Audit</span>
+                <span class="badge badge-blue">Checkpoint 2 &mdash; Verify Each Claim</span>
+              </summary>
+              <div id="claims-list" class="claims-audit-body"></div>
+            </details>
+          </div>
+        </section>
+
+      </div><!-- /#research-mode -->
+
+      <!-- ══════════════════════════════════════════
+           COMPARE MODE
+           ══════════════════════════════════════════ -->
+      <div id="compare-mode" class="hidden">
+
+        <!-- ── Compare Entry ── -->
+        <section id="compare-entry-panel" class="card">
+          <div class="panel-header">
+            <h2>Compare Two Companies</h2>
+            <span class="badge badge-blue">SEC Filings + Stock Context</span>
+          </div>
+          <p class="panel-desc">Pick any two companies and a question. FilingLens retrieves their recent filings and shows a side-by-side analysis plus stock behavior around filing dates.</p>
+
+          <div class="compare-grid">
+            <div class="compare-field">
+              <label class="field-label">Company A</label>
+              <input type="text" id="compare-ticker-a" placeholder="e.g. KO" />
+            </div>
+            <div class="compare-vs-label">vs</div>
+            <div class="compare-field">
+              <label class="field-label">Company B</label>
+              <input type="text" id="compare-ticker-b" placeholder="e.g. PEP" />
+            </div>
+          </div>
+
+          <div class="compare-field" style="margin-top:16px">
+            <label class="field-label">Comparison Question</label>
+            <textarea id="compare-query-input" rows="2" placeholder="e.g. How do these two companies describe growth strategy and margin expansion?"></textarea>
+          </div>
+
+          <div class="compare-meta-grid">
+            <div class="compare-field">
+              <label class="field-label">Filing Types</label>
+              <div class="form-type-chips" id="compare-form-types">
+                <span class="chip active" data-type="10-K" onclick="toggleCompareForm(this)">10-K</span>
+                <span class="chip active" data-type="10-Q" onclick="toggleCompareForm(this)">10-Q</span>
+                <span class="chip active" data-type="8-K" onclick="toggleCompareForm(this)">8-K</span>
+                <span class="chip active" data-type="20-F" onclick="toggleCompareForm(this)">20-F</span>
+                <span class="chip active" data-type="6-K" onclick="toggleCompareForm(this)">6-K</span>
+              </div>
+            </div>
+            <div class="compare-field">
+              <label class="field-label">Filing Time Frame</label>
+              <div class="time-preset-row" id="compare-time-presets">
+                <button class="time-preset-btn" onclick="setCompareTimePreset(1)">1Y</button>
+                <button class="time-preset-btn active" onclick="setCompareTimePreset(2)">2Y</button>
+                <button class="time-preset-btn" onclick="setCompareTimePreset(3)">3Y</button>
+                <button class="time-preset-btn" onclick="setCompareTimePreset('custom')">Custom</button>
+              </div>
+              <div class="date-range-row" style="margin-top:6px">
+                <input type="date" id="compare-date-start" />
+                <span>to</span>
+                <input type="date" id="compare-date-end" />
+              </div>
+            </div>
+            <div class="compare-field">
+              <label class="field-label">Stock Lookback</label>
+              <div class="time-preset-row" id="compare-lookback-presets">
+                <button class="time-preset-btn" onclick="setCompareLookback('1M')">1M</button>
+                <button class="time-preset-btn active" onclick="setCompareLookback('3M')">3M</button>
+                <button class="time-preset-btn" onclick="setCompareLookback('6M')">6M</button>
+                <button class="time-preset-btn" onclick="setCompareLookback('1Y')">1Y</button>
               </div>
             </div>
           </div>
 
           <div class="manual-actions">
-            <button class="btn btn-primary" id="manual-ingest-btn" onclick="startManualIngest()">
-              Ingest Filings
-            </button>
-            <span id="manual-status" class="status-text"></span>
+            <button class="btn btn-primary btn-lg" onclick="runCompare(false)">Compare Companies</button>
+            <button class="btn btn-ghost btn-sm" onclick="runCompare(true)" title="Ignore compare cache and re-run">&#8635; Refresh</button>
+            <span id="compare-status" class="status-text"></span>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- ═══ COMPARE COMPANIES ═══ -->
-      <section id="compare-entry-panel" class="card compare-feature-card">
-        <div class="panel-header">
-          <h2>Compare Companies</h2>
-          <span class="badge badge-blue">Independent Workflow</span>
-        </div>
-        <p class="panel-desc">Compare two companies using recent SEC filing language plus stock behavior around filing dates. This workflow is separate from the research-answer flow above.</p>
-
-        <div class="compare-grid">
-          <div class="compare-field">
-            <label class="field-label">Company A</label>
-            <input type="text" id="compare-ticker-a" placeholder="e.g. KO" />
-          </div>
-          <div class="compare-field">
-            <label class="field-label">Company B</label>
-            <input type="text" id="compare-ticker-b" placeholder="e.g. PEP" />
-          </div>
-        </div>
-
-        <div class="compare-field">
-          <label class="field-label">Comparison Question</label>
-          <textarea id="compare-query-input" rows="2" placeholder="e.g. How do these two companies describe growth strategy and margin expansion?"></textarea>
-        </div>
-
-        <div class="compare-meta-grid">
-          <div class="compare-field">
-            <label class="field-label">Filing Types</label>
-            <div class="form-type-chips" id="compare-form-types">
-              <span class="chip active" data-type="10-K" onclick="toggleCompareForm(this)">10-K</span>
-              <span class="chip active" data-type="10-Q" onclick="toggleCompareForm(this)">10-Q</span>
-              <span class="chip active" data-type="8-K" onclick="toggleCompareForm(this)">8-K</span>
-              <span class="chip active" data-type="20-F" onclick="toggleCompareForm(this)">20-F</span>
-              <span class="chip active" data-type="6-K" onclick="toggleCompareForm(this)">6-K</span>
-            </div>
-          </div>
-          <div class="compare-field">
-            <label class="field-label">Filing Time Frame</label>
-            <div class="time-preset-row" id="compare-time-presets">
-              <button class="time-preset-btn" onclick="setCompareTimePreset(1)">1Y</button>
-              <button class="time-preset-btn active" onclick="setCompareTimePreset(2)">2Y</button>
-              <button class="time-preset-btn" onclick="setCompareTimePreset(3)">3Y</button>
-              <button class="time-preset-btn" onclick="setCompareTimePreset('custom')">Custom</button>
-            </div>
-            <div class="date-range-row" style="margin-top:6px">
-              <input type="date" id="compare-date-start" />
-              <span>to</span>
-              <input type="date" id="compare-date-end" />
-            </div>
-          </div>
-          <div class="compare-field">
-            <label class="field-label">Stock Lookback</label>
-            <div class="time-preset-row" id="compare-lookback-presets">
-              <button class="time-preset-btn" onclick="setCompareLookback('1M')">1M</button>
-              <button class="time-preset-btn active" onclick="setCompareLookback('3M')">3M</button>
-              <button class="time-preset-btn" onclick="setCompareLookback('6M')">6M</button>
-              <button class="time-preset-btn" onclick="setCompareLookback('1Y')">1Y</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="manual-actions">
-          <button class="btn btn-primary" onclick="runCompare(false)">Compare Companies</button>
-          <button class="btn btn-ghost btn-sm" onclick="runCompare(true)" title="Ignore compare cache and re-run">&#8635; Refresh Compare</button>
-          <span id="compare-status" class="status-text"></span>
-        </div>
-      </section>
-
-      <section id="compare-results-panel" class="card hidden">
-        <div class="panel-header">
-          <h2>Company Comparison</h2>
-          <span class="badge badge-green">SEC + Stock Context</span>
-          <span id="compare-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
-        </div>
-        <div id="compare-loading" class="loading-area hidden">
-          <div class="spinner"></div>
-          <p>Fetching filings, building comparison, and loading daily price history&hellip;</p>
-        </div>
-        <div id="compare-summary-section" class="hidden">
-          <h3>Overall Comparison</h3>
-          <div class="overall-answer-card">
-            <p id="compare-overall-summary" class="overall-answer-summary"></p>
-            <div class="compare-bullet-columns">
-              <div>
-                <div class="compare-subtitle">Similarities</div>
-                <ul id="compare-similarities" class="overall-answer-points"></ul>
-              </div>
-              <div>
-                <div class="compare-subtitle">Differences</div>
-                <ul id="compare-differences" class="overall-answer-points"></ul>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div id="compare-company-section" class="hidden">
+        <!-- ── Compare Results ── -->
+        <section id="compare-results-panel" class="card hidden">
           <div class="panel-header">
-            <h3>Side-by-Side Strategy Comparison</h3>
-            <span class="badge badge-blue">Filing-Backed</span>
+            <h2>Company Comparison</h2>
+            <span class="badge badge-green">SEC + Stock Context</span>
+            <span id="compare-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
           </div>
-          <div id="compare-company-list" class="company-deep-dives-list compare-company-list"></div>
-        </div>
-        <div id="compare-chart-section" class="hidden">
-          <div class="panel-header">
-            <h3>Stock Performance Around Filings</h3>
-            <span class="badge badge-yellow">Daily Prices</span>
+          <div id="compare-loading" class="loading-area hidden">
+            <div class="spinner"></div>
+            <p>Fetching filings, building comparison, and loading daily price history&hellip;</p>
           </div>
-          <p class="compare-chart-note">The chart shows indexed performance and filing markers. Price moves are shown around filing dates and should not be treated as proof that a filing caused the move.</p>
-          <div class="compare-chart-shell">
-            <canvas id="compare-stock-chart"></canvas>
-          </div>
-        </div>
-        <div id="compare-events-section" class="hidden">
-          <h3>Filing Events</h3>
-          <div class="compare-events-table-wrap">
-            <table class="compare-events-table">
-              <thead>
-                <tr>
-                  <th>Company</th>
-                  <th>Form</th>
-                  <th>Filed</th>
-                  <th>Trading Day</th>
-                  <th>+1D</th>
-                  <th>+5D</th>
-                  <th>+30D</th>
-                </tr>
-              </thead>
-              <tbody id="compare-events-body"></tbody>
-            </table>
-          </div>
-          <div id="compare-event-detail" class="compare-event-detail hidden"></div>
-        </div>
-      </section>
-
-      <!-- ═══ SCOPE PROPOSAL (AI tab only) ═══ -->
-      <section id="scope-panel" class="card hidden">
-        <div class="panel-header">
-          <h2>Scope Proposal</h2>
-          <span class="badge badge-blue">Checkpoint 1 &mdash; Review &amp; Edit</span>
-        </div>
-        <p class="panel-desc" id="scope-rationale"></p>
-
-        <div class="scope-meta">
-          <div class="meta-group">
-            <label>Filing Types</label>
-            <div id="form-types-editor"></div>
-          </div>
-          <div class="meta-group">
-            <label>Time Frame</label>
-            <div class="time-preset-row">
-              <button class="time-preset-btn" onclick="setTimePreset(1,'scope')">1Y</button>
-              <button class="time-preset-btn" onclick="setTimePreset(2,'scope')">2Y</button>
-              <button class="time-preset-btn" onclick="setTimePreset(3,'scope')">3Y</button>
-              <button class="time-preset-btn" onclick="setTimePreset('custom','scope')">Custom</button>
-            </div>
-            <div class="date-range-row" style="margin-top:6px">
-              <input type="date" id="date-start" />
-              <span>to</span>
-              <input type="date" id="date-end" />
-            </div>
-          </div>
-        </div>
-
-        <div class="companies-section">
-          <div class="companies-header">
-            <h3>Companies (<span id="company-count">0</span>)</h3>
-            <div class="add-company-row">
-              <input type="text" id="add-ticker-input" placeholder="Add ticker (e.g. NVDA)" onkeydown="if(event.key==='Enter')addCompany()" />
-              <button class="btn btn-sm" onclick="addCompany()">+ Add</button>
-            </div>
-          </div>
-          <div id="company-list" class="company-grid"></div>
-        </div>
-
-        <div class="scope-actions">
-          <button class="btn btn-primary" onclick="approveScope()">Approve &amp; Ingest Filings</button>
-          <button class="btn btn-ghost" onclick="rejectScope()">Reject &amp; Start Over</button>
-        </div>
-      </section>
-
-      <!-- ═══ INGESTION PANEL ═══ -->
-      <section id="ingestion-panel" class="card hidden">
-        <div class="panel-header">
-          <h2>Live Ingestion</h2>
-          <span class="badge badge-yellow" id="ingestion-badge">Running</span>
-        </div>
-        <div id="ingestion-progress" class="progress-area">
-          <div class="spinner"></div>
-          <p id="ingestion-status-text">Fetching filings from SEC EDGAR&hellip;</p>
-        </div>
-        <div id="ingestion-results" class="hidden">
-          <div class="ingestion-stats" id="ingestion-stats"></div>
-          <div id="filing-list" class="filing-list"></div>
-          <div id="ingestion-errors" class="error-list hidden"></div>
-        </div>
-
-        <div id="ask-question-area" class="hidden">
-          <div class="ask-header">
-            <h3>Ask a Research Question</h3>
-            <div id="scope-ticker-chips" class="scope-chips"></div>
-          </div>
-          <div id="history-section" class="hidden">
-            <div class="history-label">Past questions &mdash; click to re-use instantly</div>
-            <div id="history-list" class="history-list"></div>
-          </div>
-          <div class="ask-input-row">
-            <textarea id="answer-query-input" rows="2" placeholder="Enter your research question&hellip;"></textarea>
-          </div>
-          <div class="ask-actions">
-            <button class="btn btn-primary" onclick="generateAnswer(false)">Generate Answer</button>
-            <button class="btn btn-ghost btn-sm" onclick="generateAnswer(true)" title="Ignore cache and re-run">&#8635; Refresh</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ═══ ANSWER PANEL ═══ -->
-      <section id="answer-panel" class="card hidden">
-        <div class="panel-header">
-          <h2>Research Answer</h2>
-          <span class="badge badge-green">Citation-Backed</span>
-          <span id="cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
-          <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="generateAnswer(true)">&#8635; Re-run</button>
-        </div>
-        <div id="answer-loading" class="loading-area hidden">
-          <div class="spinner"></div>
-          <p>Retrieving relevant chunks and generating answer&hellip;</p>
-        </div>
-        <div id="overall-answer-section" class="hidden">
-          <h3>Overall Answer</h3>
-          <div class="overall-answer-card">
-            <p id="overall-answer-summary" class="overall-answer-summary"></p>
-            <ul id="overall-answer-points" class="overall-answer-points"></ul>
-          </div>
-        </div>
-        <div id="judge-section" class="hidden">
-          <div class="panel-header">
-            <h3>LLM Judge</h3>
-            <span class="badge badge-purple">Automated Review</span>
-          </div>
-          <div class="judge-card">
-            <div class="judge-header-row">
-              <div>
-                <div id="judge-verdict" class="judge-verdict"></div>
-                <p id="judge-summary" class="judge-summary"></p>
-              </div>
-              <div id="judge-overclaiming" class="judge-risk"></div>
-            </div>
-            <div id="judge-score-grid" class="judge-score-grid"></div>
-            <div class="judge-columns">
-              <div>
-                <div class="compare-subtitle">Strengths</div>
-                <ul id="judge-strengths" class="judge-list"></ul>
-              </div>
-              <div>
-                <div class="compare-subtitle">Concerns</div>
-                <ul id="judge-concerns" class="judge-list"></ul>
+          <div id="compare-summary-section" class="hidden">
+            <h3>Overall Comparison</h3>
+            <div class="overall-answer-card">
+              <p id="compare-overall-summary" class="overall-answer-summary"></p>
+              <div class="compare-bullet-columns">
+                <div>
+                  <div class="compare-subtitle">Similarities</div>
+                  <ul id="compare-similarities" class="overall-answer-points"></ul>
+                </div>
+                <div>
+                  <div class="compare-subtitle">Differences</div>
+                  <ul id="compare-differences" class="overall-answer-points"></ul>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <div id="company-deep-dives-section" class="hidden">
-          <div class="panel-header">
-            <h3>Company Deep Dives</h3>
-            <span class="badge badge-blue">Question-Adaptive</span>
+          <div id="compare-company-section" class="hidden">
+            <div class="panel-header">
+              <h3>Side-by-Side Strategy Comparison</h3>
+              <span class="badge badge-blue">Filing-Backed</span>
+            </div>
+            <div id="compare-company-list" class="company-deep-dives-list compare-company-list"></div>
           </div>
-          <div id="company-deep-dives-list" class="company-deep-dives-list"></div>
-        </div>
-        <div id="coverage-section" class="hidden">
-          <h3 class="gaps-title">Coverage Notes</h3>
-          <ul id="coverage-list" class="gaps-list"></ul>
-        </div>
-        <div id="claims-section" class="hidden">
-          <details id="claims-audit-details" class="claims-audit">
-            <summary class="claims-audit-summary">
-              <span>Claims Audit</span>
-              <span class="badge badge-blue">Checkpoint 2 &mdash; Verify Each Claim</span>
-            </summary>
-            <div id="claims-list" class="claims-audit-body"></div>
-          </details>
-        </div>
-      </section>
+          <div id="compare-chart-section" class="hidden">
+            <div class="panel-header">
+              <h3>Stock Performance Around Filings</h3>
+              <span class="badge badge-yellow">Daily Prices</span>
+            </div>
+            <p class="compare-chart-note">The chart shows indexed performance and filing markers. Price moves are shown around filing dates and should not be treated as proof that a filing caused the move.</p>
+            <div class="compare-chart-shell">
+              <canvas id="compare-stock-chart"></canvas>
+            </div>
+          </div>
+          <div id="compare-events-section" class="hidden">
+            <h3>Filing Events</h3>
+            <div class="compare-events-table-wrap">
+              <table class="compare-events-table">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Form</th>
+                    <th>Filed</th>
+                    <th>Trading Day</th>
+                    <th>+1D</th>
+                    <th>+5D</th>
+                    <th>+30D</th>
+                  </tr>
+                </thead>
+                <tbody id="compare-events-body"></tbody>
+              </table>
+            </div>
+            <div id="compare-event-detail" class="compare-event-detail hidden"></div>
+          </div>
+        </section>
+
+      </div><!-- /#compare-mode -->
+
+      <!-- ══════════════════════════════════════════
+           CHANGE INTELLIGENCE MODE
+           ══════════════════════════════════════════ -->
+      <div id="change-mode" class="hidden">
+
+        <section id="change-entry-panel" class="card">
+          <div class="panel-header">
+            <h2>Filing Change Intelligence</h2>
+            <span class="badge badge-blue">One Company Across Time</span>
+          </div>
+          <p class="panel-desc">Track how a company’s language changed across filings. FilingLens compares recent filings, detects material wording shifts, classifies them, and shows market context around the filing dates.</p>
+
+          <div class="change-grid">
+            <div class="compare-field">
+              <label class="field-label">Company</label>
+              <input type="text" id="change-ticker" placeholder="e.g. BUD" />
+            </div>
+            <div class="compare-field">
+              <label class="field-label">Max Filings</label>
+              <select id="change-max-filings">
+                <option value="2">2 filings</option>
+                <option value="3" selected>3 filings</option>
+                <option value="4">4 filings</option>
+                <option value="5">5 filings</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="compare-field" style="margin-top:16px">
+            <label class="field-label">Change Lens</label>
+            <textarea id="change-query-input" rows="2" placeholder="e.g. What changed in this company’s strategy, pricing, margin, and market positioning?"></textarea>
+          </div>
+
+          <div class="compare-meta-grid">
+            <div class="compare-field">
+              <label class="field-label">Filing Types</label>
+              <div class="form-type-chips" id="change-form-types">
+                <span class="chip active" data-type="10-K" onclick="toggleChangeForm(this)">10-K</span>
+                <span class="chip active" data-type="10-Q" onclick="toggleChangeForm(this)">10-Q</span>
+                <span class="chip" data-type="8-K" onclick="toggleChangeForm(this)">8-K</span>
+                <span class="chip" data-type="20-F" onclick="toggleChangeForm(this)">20-F</span>
+                <span class="chip" data-type="6-K" onclick="toggleChangeForm(this)">6-K</span>
+              </div>
+            </div>
+            <div class="compare-field">
+              <label class="field-label">Filing Time Frame</label>
+              <div class="time-preset-row" id="change-time-presets">
+                <button class="time-preset-btn" onclick="setChangeTimePreset(1)">1Y</button>
+                <button class="time-preset-btn active" onclick="setChangeTimePreset(2)">2Y</button>
+                <button class="time-preset-btn" onclick="setChangeTimePreset(3)">3Y</button>
+                <button class="time-preset-btn" onclick="setChangeTimePreset('custom')">Custom</button>
+              </div>
+              <div class="date-range-row" style="margin-top:6px">
+                <input type="date" id="change-date-start" />
+                <span>to</span>
+                <input type="date" id="change-date-end" />
+              </div>
+            </div>
+            <div class="compare-field">
+              <label class="field-label">Stock Context</label>
+              <div class="time-preset-row" id="change-lookback-presets">
+                <button class="time-preset-btn" onclick="setChangeLookback('OFF')">Off</button>
+                <button class="time-preset-btn" onclick="setChangeLookback('1M')">1M</button>
+                <button class="time-preset-btn active" onclick="setChangeLookback('3M')">3M</button>
+                <button class="time-preset-btn" onclick="setChangeLookback('6M')">6M</button>
+                <button class="time-preset-btn" onclick="setChangeLookback('1Y')">1Y</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="manual-actions">
+            <button class="btn btn-primary btn-lg" onclick="runChangeIntelligence(false)">Analyze Filing Changes</button>
+            <button class="btn btn-ghost btn-sm" onclick="runChangeIntelligence(true)" title="Ignore change cache and re-run">&#8635; Refresh</button>
+            <span id="change-status" class="status-text"></span>
+          </div>
+        </section>
+
+        <section id="change-results-panel" class="card hidden">
+          <div class="panel-header">
+            <h2>Filing Change Intelligence</h2>
+            <span class="badge badge-green">Filing-Backed</span>
+            <span id="change-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+          </div>
+          <div id="change-loading" class="loading-area hidden">
+            <div class="spinner"></div>
+            <p>Fetching filings, aligning time windows, detecting changed language, and loading optional market context&hellip;</p>
+          </div>
+          <div id="change-summary-section" class="hidden">
+            <h3>Overall Change Summary</h3>
+            <div class="overall-answer-card">
+              <p id="change-overall-summary" class="overall-answer-summary"></p>
+            </div>
+          </div>
+          <div id="change-filings-section" class="hidden">
+            <div class="panel-header">
+              <h3>Filings Found</h3>
+              <span class="badge badge-blue">Source Documents</span>
+            </div>
+            <div id="change-filings-list" class="change-filings-list"></div>
+          </div>
+          <div id="change-timeline-section" class="hidden">
+            <div class="panel-header">
+              <h3>Timeline / Filing Selector</h3>
+              <span class="badge badge-blue">Time Windows</span>
+            </div>
+            <div id="change-window-selector" class="change-window-selector"></div>
+          </div>
+          <div id="change-cards-section" class="hidden">
+            <div class="panel-header">
+              <h3>Change Cards</h3>
+              <span class="badge badge-yellow">Material Language Shifts</span>
+            </div>
+            <div id="change-cards-list" class="change-cards-list"></div>
+          </div>
+          <div id="change-chart-section" class="hidden">
+            <div class="panel-header">
+              <h3>Stock Context</h3>
+              <span class="badge badge-yellow">Optional</span>
+            </div>
+            <p class="compare-chart-note">This chart shows stock behavior around the selected filing windows. It provides market context, not proof that the filing caused the move.</p>
+            <div class="compare-chart-shell">
+              <canvas id="change-stock-chart"></canvas>
+            </div>
+          </div>
+          <div id="change-events-section" class="hidden">
+            <h3>Filing Events</h3>
+            <div class="compare-events-table-wrap">
+              <table class="compare-events-table">
+                <thead>
+                  <tr>
+                    <th>Form</th>
+                    <th>Filed</th>
+                    <th>Trading Day</th>
+                    <th>+1D</th>
+                    <th>+5D</th>
+                    <th>+30D</th>
+                  </tr>
+                </thead>
+                <tbody id="change-events-body"></tbody>
+              </table>
+            </div>
+            <div id="change-event-detail" class="compare-event-detail hidden"></div>
+          </div>
+        </section>
+
+      </div><!-- /#change-mode -->
 
     </section>
 
