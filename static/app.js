@@ -40,6 +40,52 @@ const $ = id => document.getElementById(id);
 const show = id => $(id) && $(id).classList.remove('hidden');
 const hide = id => $(id) && $(id).classList.add('hidden');
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function hashSeed(value) {
+  let hash = 0;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function companyInitials(ticker, name) {
+  const cleanTicker = String(ticker || '').trim().toUpperCase();
+  if (cleanTicker) return cleanTicker.slice(0, 2);
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'FL';
+  return parts.slice(0, 2).map(part => part[0]).join('').toUpperCase();
+}
+
+function companyAvatarMarkup(ticker, name, size = 'md') {
+  const initials = escapeHtml(companyInitials(ticker, name));
+  const hue = hashSeed(`${ticker}-${name}`) % 360;
+  return `
+    <span class="company-avatar company-avatar-${size}" style="--avatar-hue:${hue}deg" aria-hidden="true">
+      <span>${initials}</span>
+    </span>
+  `;
+}
+
+function tickerChipMarkup(ticker, name = '') {
+  return `
+    <span class="scope-chip scope-chip-rich">
+      ${companyAvatarMarkup(ticker, name || ticker, 'xs')}
+      <span>${escapeHtml(ticker)}</span>
+    </span>
+  `;
+}
+
 function switchMode(mode) {
   const modes = ['research', 'compare', 'change', 'gap'];
   modes.forEach(m => {
@@ -51,10 +97,10 @@ function switchMode(mode) {
   const tagline = $('mode-tagline');
   if (tagline) {
     tagline.textContent = {
-      research: 'Ask questions across SEC filings for a set of companies',
-      compare:  'Side-by-side analysis of two companies using their filings',
-      change:   'Track how one company’s filing language changes across time',
-      gap:      'Find structural pain points across an industry and identify where incumbents are stuck',
+      research: 'Cross-company SEC research with reviewable evidence and production-style summaries',
+      compare:  'Professional side-by-side company analysis with filing-backed strategy and market context',
+      change:   'Track how a company’s disclosure language evolves across time and what it may signal',
+      gap:      'Identify recurring industry pain points and where structurally constrained incumbents leave room for entrants',
     }[mode] || '';
   }
 }
@@ -166,6 +212,9 @@ function renderLibrary(entries) {
     const filingCount = (entry.filings || []).length;
     return `
       <div class="library-entry" id="lib-entry-${entry.id}">
+        <div class="library-entry-avatar">
+          ${companyAvatarMarkup((entry.companies || [])[0]?.ticker || entry.name, entry.name, 'sm')}
+        </div>
         <div class="library-entry-main">
           <div class="library-entry-name">${entry.name}</div>
           <div class="library-entry-meta">${tickers} &bull; ${entry.form_types?.join(', ') || ''} &bull; ${filingCount} filing${filingCount !== 1 ? 's' : ''} &bull; saved ${date}</div>
@@ -197,7 +246,7 @@ async function saveAnalyst() {
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
     $('library-name-input').value = '';
-    statusEl.textContent = `✓ Saved as "${name}"`;
+    statusEl.textContent = `Saved as "${name}"`;
     statusEl.className = 'library-save-status success';
     log(`Analyst saved: ${name}`, 'success');
     // Refresh the library panel count badge quietly
@@ -338,7 +387,8 @@ function renderManualChips() {
   show('manual-ticker-chips');
   container.innerHTML = state.manualTickers.map(t => `
     <span class="ticker-chip">
-      ${t}
+      ${companyAvatarMarkup(t, t, 'xs')}
+      <span>${t}</span>
       <span class="x" onclick="removeManualTicker('${t}')" title="Remove">&#x2715;</span>
     </span>
   `).join('');
@@ -484,8 +534,13 @@ function renderCompanyGrid() {
     card.className = 'company-card';
     card.innerHTML = `
       <button class="remove-btn" onclick="removeCompany(${i})">&#x2715;</button>
-      <div class="ticker">${c.ticker || '—'}</div>
-      <div class="company-name">${c.name || ''}</div>
+      <div class="company-card-top">
+        ${companyAvatarMarkup(c.ticker, c.name, 'lg')}
+        <div class="company-card-id">
+          <div class="ticker">${c.ticker || '—'}</div>
+          <div class="company-name">${c.name || ''}</div>
+        </div>
+      </div>
       ${c.rationale ? `<div class="rationale">${c.rationale}</div>` : ''}
     `;
     grid.appendChild(card);
@@ -640,7 +695,10 @@ function renderIngestionResults(data) {
 
   // Show company scope chips
   const tickers = state.companies.map(c => c.ticker).filter(Boolean);
-  $('scope-ticker-chips').innerHTML = tickers.map(t => `<span class="scope-chip">${t}</span>`).join('');
+  $('scope-ticker-chips').innerHTML = state.companies
+    .filter(c => c.ticker)
+    .map(c => tickerChipMarkup(c.ticker, c.name))
+    .join('');
 
   show('ask-question-area');
   loadHistory();
@@ -666,9 +724,9 @@ function renderHistory(history) {
     const btn = document.createElement('button');
     btn.className = 'history-item';
     btn.innerHTML = `
-      <span class="h-icon">&#128203;</span>
+      <span class="h-icon">Q</span>
       <span class="h-text">${item.query}</span>
-      <span class="h-cached">&#9889; cached</span>
+      <span class="h-cached">cached</span>
     `;
     btn.onclick = () => {
       $('answer-query-input').value = item.query;
@@ -709,7 +767,7 @@ async function generateAnswer(forceRefresh = false) {
 
     if (data.from_cache) {
       show('cached-badge');
-      log('Answer served from cache ⚡', 'success');
+      log('Answer served from cache', 'success');
       // Log cached workflow stages so the activity log still shows them
       if (data.workflow?.stages) {
         data.workflow.stages.forEach(s => log(`[${s.name}] ${s.summary}`, 'info'));
@@ -819,7 +877,7 @@ function buildEvidenceDisclosure(items, label, emptyLabel = '') {
   return `
     <details class="evidence-disclosure">
       <summary class="evidence-disclosure-summary">
-        <span>&#128269; ${label}</span>
+        <span>${label}</span>
         <span class="evidence-disclosure-count">${items.length}</span>
       </summary>
       <div class="evidence-disclosure-body">
@@ -854,9 +912,12 @@ function buildCompanyDeepDiveCard(dive) {
   return `
     <article class="deep-dive-card ${statusClass}">
       <div class="deep-dive-header">
-        <div>
-          <div class="deep-dive-ticker">${dive.ticker || '—'}</div>
-          <div class="deep-dive-name">${dive.company_name || ''}</div>
+        <div class="deep-dive-company">
+          ${companyAvatarMarkup(dive.ticker, dive.company_name, 'sm')}
+          <div>
+            <div class="deep-dive-ticker">${dive.ticker || '—'}</div>
+            <div class="deep-dive-name">${dive.company_name || ''}</div>
+          </div>
         </div>
         <span class="deep-dive-status">${statusLabel}</span>
       </div>
@@ -888,10 +949,10 @@ function buildClaimCard(claim) {
       <div class="evidence-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:8px auto"></div></div>
     </div>
     <div class="verdict-controls">
-      <button class="toggle-evidence-btn" onclick="toggleEvidence('${claim.claim_id}')">&#128269; Show evidence</button>
-      <button class="verdict-btn v-confirmed"      onclick="submitVerdict('${claim.claim_id}','confirmed',this)">&#10003; Confirmed</button>
-      <button class="verdict-btn v-needs_revision" onclick="submitVerdict('${claim.claim_id}','needs_revision',this)">&#9998; Needs Revision</button>
-      <button class="verdict-btn v-hallucinated"   onclick="submitVerdict('${claim.claim_id}','hallucinated',this)">&#9747; Hallucinated</button>
+      <button class="toggle-evidence-btn" onclick="toggleEvidence('${claim.claim_id}')">Show evidence</button>
+      <button class="verdict-btn v-confirmed"      onclick="submitVerdict('${claim.claim_id}','confirmed',this)">Confirmed</button>
+      <button class="verdict-btn v-needs_revision" onclick="submitVerdict('${claim.claim_id}','needs_revision',this)">Needs Revision</button>
+      <button class="verdict-btn v-hallucinated"   onclick="submitVerdict('${claim.claim_id}','hallucinated',this)">Hallucinated</button>
     </div>
   `;
   return card;
@@ -1099,9 +1160,12 @@ function buildCompareCompanyCard(comparison) {
   return `
     <article class="deep-dive-card ${statusClass}">
       <div class="deep-dive-header">
-        <div>
-          <div class="deep-dive-ticker">${comparison.ticker}</div>
-          <div class="deep-dive-name">${comparison.company_name}</div>
+        <div class="deep-dive-company">
+          ${companyAvatarMarkup(comparison.ticker, comparison.company_name, 'sm')}
+          <div>
+            <div class="deep-dive-ticker">${comparison.ticker}</div>
+            <div class="deep-dive-name">${comparison.company_name}</div>
+          </div>
         </div>
         <span class="deep-dive-status">${statusLabel}</span>
       </div>
@@ -1371,6 +1435,7 @@ function renderChangeIntelligence(data) {
           : '';
         return `
           <div class="change-filing-row">
+            ${companyAvatarMarkup(event.ticker, event.company_name || event.ticker, 'xs')}
             <span class="change-filing-type">${event.form_type || '—'}</span>
             <span class="change-filing-date">${event.filing_date || '—'}</span>
             <span class="change-filing-accession">${event.accession_number || ''}</span>
@@ -1687,7 +1752,7 @@ async function clearData() {
     const data = await res.json();
 
     if (data.cleared.length) {
-      resultEl.textContent = `✓ Cleared: ${data.cleared.join(', ')}`;
+      resultEl.textContent = `Cleared: ${data.cleared.join(', ')}`;
       resultEl.className = 'clear-result success';
       log(`Data cleared: ${data.cleared.join(', ')}`, 'warn');
 
@@ -1806,8 +1871,13 @@ function renderGapCompanyGrid() {
     card.className = 'company-card';
     card.innerHTML = `
       <button class="remove-btn" onclick="removeGapCompany(${i})">&#x2715;</button>
-      <div class="ticker">${c.ticker || '—'}</div>
-      <div class="company-name">${c.name || ''}</div>
+      <div class="company-card-top">
+        ${companyAvatarMarkup(c.ticker, c.name, 'lg')}
+        <div class="company-card-id">
+          <div class="ticker">${c.ticker || '—'}</div>
+          <div class="company-name">${c.name || ''}</div>
+        </div>
+      </div>
       ${c.rationale ? `<div class="rationale">${c.rationale}</div>` : ''}
     `;
     grid.appendChild(card);
@@ -1891,7 +1961,7 @@ async function proposeGapScope() {
     log('Gap scope error: ' + err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = '🔍 Discover Companies';
+    btn.textContent = 'Discover Companies';
   }
 }
 
@@ -1932,7 +2002,7 @@ async function runMarketGap(forceRefresh = false) {
 
     if (data.from_cache) {
       show('gap-cached-badge');
-      log('Market gap served from cache ⚡', 'success');
+      log('Market gap served from cache', 'success');
     } else {
       hide('gap-cached-badge');
       log(`Market gap complete: ${data.gap_clusters.length} clusters, ${(data.opportunity_memos || []).length} memos`, 'success');
@@ -1982,10 +2052,10 @@ function buildGapClusterCard(cluster) {
   const confClass = { high: 'conf-high', medium: 'conf-medium', low: 'conf-low' }[cluster.confidence] || 'conf-medium';
   const stuckConf = cluster.incumbents_stuck_confidence || 'low';
   const stuckLabel = {
-    high: '🔒 Strong lock-in',
-    medium: '⚠️ Partial constraint',
-    low: '❓ Weak constraint',
-    insufficient: '✗ No clear structural barrier',
+    high: 'Strong lock-in',
+    medium: 'Partial constraint',
+    low: 'Weak constraint',
+    insufficient: 'No clear structural barrier',
   }[stuckConf] || stuckConf;
   const stuckClass = {
     high: 'stuck-high',
@@ -1994,7 +2064,7 @@ function buildGapClusterCard(cluster) {
     insufficient: 'stuck-none',
   }[stuckConf] || 'stuck-low';
 
-  const tickers = (cluster.company_tickers || []).map(t => `<span class="scope-chip">${t}</span>`).join('');
+  const tickers = (cluster.company_tickers || []).map(t => tickerChipMarkup(t, t)).join('');
   const financial = cluster.financial_scale_estimate
     ? `<div class="gap-meta-item"><span class="gap-meta-label">Financial scale</span><span class="gap-meta-value">${cluster.financial_scale_estimate}</span></div>`
     : '';

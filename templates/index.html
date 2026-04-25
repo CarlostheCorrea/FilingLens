@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FilingLens — SEC Filing Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,600;6..72,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -11,11 +14,15 @@
   <!-- ═══ HEADER ═══ -->
   <header>
     <div class="header-inner">
-      <div>
-        <h1>FilingLens</h1>
-        <p class="header-sub">RAG &middot; MCP &middot; Human-in-the-Loop &middot; SEC EDGAR</p>
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">FL</div>
+        <div>
+          <div class="brand-eyebrow">Market Intelligence Workspace</div>
+          <h1>FilingLens</h1>
+          <p class="header-sub">SEC EDGAR research, comparison, change intelligence, and market opportunity analysis</p>
+        </div>
       </div>
-      <div class="header-badge">GPT-4o</div>
+      <div class="header-badge">Live Workspace</div>
     </div>
   </header>
 
@@ -23,26 +30,26 @@
   <nav class="mode-bar">
     <div class="mode-inner">
       <button class="mode-btn active" id="mode-btn-research" onclick="switchMode('research')">
-        <span class="mode-icon">&#128202;</span>
-        <span>Market Analyst</span>
+        <span class="mode-index">01</span>
+        <span class="mode-label">Market Analyst</span>
       </button>
       <div class="mode-divider"></div>
       <button class="mode-btn" id="mode-btn-compare" onclick="switchMode('compare')">
-        <span class="mode-icon">&#9878;</span>
-        <span>Compare Two Companies</span>
+        <span class="mode-index">02</span>
+        <span class="mode-label">Compare Companies</span>
       </button>
       <div class="mode-divider"></div>
       <button class="mode-btn" id="mode-btn-change" onclick="switchMode('change')">
-        <span class="mode-icon">&#128260;</span>
-        <span>Filing Change Intelligence</span>
+        <span class="mode-index">03</span>
+        <span class="mode-label">Change Intelligence</span>
       </button>
       <div class="mode-divider"></div>
       <button class="mode-btn" id="mode-btn-gap" onclick="switchMode('gap')">
-        <span class="mode-icon">&#128270;</span>
-        <span>Market Gap Discovery</span>
+        <span class="mode-index">04</span>
+        <span class="mode-label">Market Gap Discovery</span>
       </button>
       <p class="mode-tagline" id="mode-tagline">
-        Multi-company analysis &mdash; AI picks companies, ingests filings, generates citation-backed answers
+        Cross-company SEC research with reviewable evidence and production-style summaries
       </p>
     </div>
   </nav>
@@ -59,7 +66,7 @@
         <section class="card" id="library-panel">
           <div class="library-header" onclick="toggleLibraryPanel()">
             <div class="library-header-left">
-              <span class="library-icon">&#128218;</span>
+              <span class="library-icon" aria-hidden="true">A</span>
               <h3>My Analysts</h3>
               <span id="library-count-badge" class="badge badge-blue hidden"></span>
             </div>
@@ -77,10 +84,10 @@
         <section class="card" id="entry-panel">
           <div class="tab-nav">
             <button class="tab-btn active" id="tab-btn-ai" onclick="switchTab('ai')">
-              &#129504; AI Research
+              AI Research
             </button>
             <button class="tab-btn" id="tab-btn-manual" onclick="switchTab('manual')">
-              &#128203; Manual Selection
+              Manual Selection
             </button>
           </div>
 
@@ -115,10 +122,10 @@
             <div class="manual-section">
               <label class="field-label">Quick Presets</label>
               <div class="preset-row">
-                <button class="preset-btn" onclick="addPreset('semis')">&#127758; Semiconductors</button>
-                <button class="preset-btn" onclick="addPreset('bigtech')">&#128187; Big Tech</button>
-                <button class="preset-btn" onclick="addPreset('ev')">&#9889; EV Makers</button>
-                <button class="preset-btn" onclick="addPreset('banks')">&#127970; Big Banks</button>
+                <button class="preset-btn" onclick="addPreset('semis')">Semiconductors</button>
+                <button class="preset-btn" onclick="addPreset('bigtech')">Big Tech</button>
+                <button class="preset-btn" onclick="addPreset('ev')">EV Makers</button>
+                <button class="preset-btn" onclick="addPreset('banks')">Large Banks</button>
                 <button class="btn-clear-all" onclick="clearManualTickers()">Clear all</button>
               </div>
             </div>
@@ -223,7 +230,7 @@
             <div id="ingestion-errors" class="error-list hidden"></div>
             <div class="library-save-row">
               <input id="library-name-input" type="text" placeholder="Name this analyst (e.g. Beer Industry 2Y)&hellip;" class="library-name-input" />
-              <button class="btn btn-ghost btn-sm" onclick="saveAnalyst()">&#128190; Save as Analyst</button>
+              <button class="btn btn-ghost btn-sm" onclick="saveAnalyst()">Save as Analyst</button>
             </div>
             <div id="library-save-status" class="library-save-status hidden"></div>
           </div>
@@ -252,7 +259,7 @@
           <div class="panel-header">
             <h2>Research Answer</h2>
             <span class="badge badge-green">Citation-Backed</span>
-            <span id="cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+            <span id="cached-badge" class="badge badge-purple hidden">Cached</span>
             <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="generateAnswer(true)">&#8635; Re-run</button>
           </div>
           <div id="answer-loading" class="loading-area hidden">
@@ -394,7 +401,7 @@
           <div class="panel-header">
             <h2>Company Comparison</h2>
             <span class="badge badge-green">SEC + Stock Context</span>
-            <span id="compare-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+            <span id="compare-cached-badge" class="badge badge-purple hidden">Cached</span>
           </div>
           <div id="compare-loading" class="loading-area hidden">
             <div class="spinner"></div>
@@ -538,7 +545,7 @@
           <div class="panel-header">
             <h2>Filing Change Intelligence</h2>
             <span class="badge badge-green">Filing-Backed</span>
-            <span id="change-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+            <span id="change-cached-badge" class="badge badge-purple hidden">Cached</span>
           </div>
           <div id="change-loading" class="loading-area hidden">
             <div class="spinner"></div>
@@ -623,7 +630,7 @@
           </div>
 
           <div class="ask-actions" style="margin-bottom:0">
-            <button class="btn btn-primary" id="gap-propose-btn" onclick="proposeGapScope()">&#128270; Discover Companies</button>
+            <button class="btn btn-primary" id="gap-propose-btn" onclick="proposeGapScope()">Discover Companies</button>
           </div>
         </section>
 
@@ -666,7 +673,7 @@
           <div id="gap-company-list" class="company-grid"></div>
 
           <div class="scope-actions">
-            <button class="btn btn-primary" onclick="runMarketGap(false)">&#128270; Analyze Market Gaps</button>
+            <button class="btn btn-primary" onclick="runMarketGap(false)">Analyze Market Gaps</button>
             <button class="btn btn-ghost" onclick="rejectGapScope()">Reject &amp; Start Over</button>
           </div>
         </section>
@@ -676,7 +683,7 @@
           <div class="panel-header">
             <h2>Market Gap Analysis</h2>
             <span class="badge badge-purple">Filing-Backed</span>
-            <span id="gap-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+            <span id="gap-cached-badge" class="badge badge-purple hidden">Cached</span>
           </div>
           <div id="gap-loading" class="loading-area hidden">
             <div class="spinner"></div>
@@ -732,7 +739,7 @@
     <!-- ═══ ACTIVITY SIDEBAR ═══ -->
     <aside id="activity-sidebar">
       <div class="sidebar-header">
-        <h3>Activity Log</h3>
+        <h3>Workspace Feed</h3>
         <button class="btn btn-sm btn-ghost" onclick="clearLog()">Clear</button>
       </div>
       <div id="activity-log"></div>
@@ -740,7 +747,7 @@
       <!-- Data Management -->
       <div class="data-mgmt-panel">
         <div class="data-mgmt-header" onclick="toggleDataPanel()">
-          <span>&#128465; Data Storage</span>
+          <span>Workspace Controls</span>
           <span id="data-mgmt-chevron">&#9660;</span>
         </div>
         <div id="data-mgmt-body" class="hidden">
@@ -752,7 +759,7 @@
             <label class="data-check"><input type="checkbox" id="clear-logs" /> Event logs</label>
           </div>
           <div class="data-actions">
-            <button class="btn btn-sm btn-ghost" onclick="loadDataStatus()">&#8635; Refresh</button>
+            <button class="btn btn-sm btn-ghost" onclick="loadDataStatus()">Refresh</button>
             <button class="btn btn-sm btn-danger" onclick="clearData()">Clear Selected</button>
           </div>
           <p id="clear-result" class="clear-result"></p>
