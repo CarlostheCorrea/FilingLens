@@ -305,3 +305,99 @@ class ChangeIntelligenceResponse(BaseModel):
     change_cards: list[ChangeCard] = Field(default_factory=list)
     stock_series: list[StockSeries] = Field(default_factory=list)
     filing_events: list[FilingEvent] = Field(default_factory=list)
+
+
+# ── Market Gap Discovery ──────────────────────────────────────────────────────
+
+class PainPoint(BaseModel):
+    company_ticker: str
+    text: str
+    category: str  # operational | regulatory | supply_chain | technology | competitive | financial
+    financial_scale: Optional[str] = None
+    filing_date: str
+    form_type: str
+    accession_number: str = ""
+    cik: str = ""
+    chunk_ids: list[str] = Field(default_factory=list)
+    confidence: str  # high | medium | low
+    severity: str    # mild | moderate | severe
+    buyer_owner_hint: str = ""
+    recurrence_hint: str = ""
+
+
+class GapCluster(BaseModel):
+    cluster_id: str
+    theme: str
+    description: str
+    frequency: int
+    total_companies: int
+    company_tickers: list[str]
+    evidence_count: int
+    latest_filing_date: str
+    financial_scale_estimate: Optional[str] = None
+    incumbents_stuck_reason: str = ""
+    incumbents_stuck_confidence: str = ""  # high | medium | low | insufficient
+    hard_constraints: list[str] = Field(default_factory=list)
+    soft_constraints: list[str] = Field(default_factory=list)
+    buyer_owners: list[str] = Field(default_factory=list)
+    urgency_level: str = ""
+    persistence_level: str = ""
+    adoption_difficulty: str = ""
+    why_now: str = ""
+    disconfirming_evidence: list[str] = Field(default_factory=list)
+    cluster_score: float = 0.0
+    confidence: str = "medium"  # high | medium | low
+    pain_points: list[PainPoint] = Field(default_factory=list)
+
+
+class OpportunityHypothesis(BaseModel):
+    hypothesis_id: str
+    title: str
+    description: str
+    target_cluster_id: str
+    why_incumbents_cant_copy: str
+    failure_modes: list[str] = Field(default_factory=list)
+    evidence_chunk_ids: list[str] = Field(default_factory=list)
+    opportunity_status: str  # no_clear_opportunity | speculative | plausible | strong
+    status_rationale: str
+
+
+class OpportunityMemo(BaseModel):
+    memo_id: str
+    title: str
+    target_cluster_id: str
+    opportunity_type: str
+    buyer_owner: str
+    problem: str
+    thesis: str
+    pain_severity: str
+    urgency_level: str
+    hard_constraint_strength: str
+    adoption_difficulty: str
+    why_incumbents_are_stuck: str
+    why_now: str
+    why_this_may_fail: list[str] = Field(default_factory=list)
+    evidence_chunk_ids: list[str] = Field(default_factory=list)
+    opportunity_status: str  # no_clear_opportunity | speculative | plausible | strong
+    status_rationale: str
+    opportunity_score: float = 0.0
+
+
+class MarketGapRequest(BaseModel):
+    query: str
+    companies: list[Company]
+    form_types: list[str]
+    filing_date_range: list[str]
+
+
+class MarketGapResponse(BaseModel):
+    run_id: str
+    from_cache: bool = False
+    retrieval_version: str = ""
+    schema_version: str = ""
+    industry_summary: str
+    market_structure_summary: str = ""
+    gap_clusters: list[GapCluster] = Field(default_factory=list)
+    opportunity_memos: list[OpportunityMemo] = Field(default_factory=list)
+    opportunity_hypotheses: list[OpportunityHypothesis] = Field(default_factory=list)
+    coverage_notes: list[str] = Field(default_factory=list)

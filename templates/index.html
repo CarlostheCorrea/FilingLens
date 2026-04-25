@@ -36,6 +36,11 @@
         <span class="mode-icon">&#128260;</span>
         <span>Filing Change Intelligence</span>
       </button>
+      <div class="mode-divider"></div>
+      <button class="mode-btn" id="mode-btn-gap" onclick="switchMode('gap')">
+        <span class="mode-icon">&#128270;</span>
+        <span>Market Gap Discovery</span>
+      </button>
       <p class="mode-tagline" id="mode-tagline">
         Multi-company analysis &mdash; AI picks companies, ingests filings, generates citation-backed answers
       </p>
@@ -598,6 +603,129 @@
         </section>
 
       </div><!-- /#change-mode -->
+
+      <!-- ══════════════════════════════════════════
+           MARKET GAP DISCOVERY MODE
+           ══════════════════════════════════════════ -->
+      <div id="gap-mode" class="hidden">
+
+        <!-- ── Input Panel ── -->
+        <section class="card" id="gap-entry-panel">
+          <div class="panel-header">
+            <h2>Market Gap Discovery</h2>
+            <span class="badge badge-purple">Filing-Backed</span>
+          </div>
+          <p class="panel-desc">Describe an industry or sector. The AI will discover a representative set of companies, extract recurring pain points from their SEC filings, and identify gaps where incumbents appear structurally unable to solve their own problems.</p>
+
+          <div class="form-row">
+            <label class="form-label">Industry / Sector</label>
+            <textarea id="gap-query-input" rows="2" placeholder="e.g. US beverage distribution, cloud software security, regional banking…"></textarea>
+          </div>
+
+          <div class="ask-actions" style="margin-bottom:0">
+            <button class="btn btn-primary" id="gap-propose-btn" onclick="proposeGapScope()">&#128270; Discover Companies</button>
+          </div>
+        </section>
+
+        <!-- ── Scope HITL ── -->
+        <section class="card hidden" id="gap-scope-panel">
+          <div class="panel-header">
+            <h3>Scope Proposal</h3>
+            <span class="badge badge-yellow">Checkpoint &mdash; Review &amp; Edit</span>
+          </div>
+          <p id="gap-scope-rationale" class="scope-rationale"></p>
+
+          <div class="scope-controls">
+            <div>
+              <label class="form-label">Filing Types</label>
+              <div id="gap-form-types-editor"></div>
+            </div>
+            <div>
+              <label class="form-label">Time Frame</label>
+              <div class="time-preset-row">
+                <button class="time-preset-btn" onclick="setGapTimePreset(1)">1Y</button>
+                <button class="time-preset-btn" onclick="setGapTimePreset(2)">2Y</button>
+                <button class="time-preset-btn active" onclick="setGapTimePreset(3)">3Y</button>
+                <button class="time-preset-btn" onclick="setGapTimePreset('custom')">Custom</button>
+              </div>
+              <div class="date-range-row">
+                <input type="date" id="gap-date-start" />
+                <span>to</span>
+                <input type="date" id="gap-date-end" />
+              </div>
+            </div>
+          </div>
+
+          <div class="company-section-header">
+            <h3>Companies (<span id="gap-company-count">0</span>)</h3>
+            <div class="add-company-row">
+              <input type="text" id="gap-add-ticker-input" placeholder="Add ticker (e.g. KO)" />
+              <button class="btn btn-sm btn-ghost" onclick="addGapCompany()">+ Add</button>
+            </div>
+          </div>
+          <div id="gap-company-list" class="company-grid"></div>
+
+          <div class="scope-actions">
+            <button class="btn btn-primary" onclick="runMarketGap(false)">&#128270; Analyze Market Gaps</button>
+            <button class="btn btn-ghost" onclick="rejectGapScope()">Reject &amp; Start Over</button>
+          </div>
+        </section>
+
+        <!-- ── Results Panel ── -->
+        <section class="card hidden" id="gap-results-panel">
+          <div class="panel-header">
+            <h2>Market Gap Analysis</h2>
+            <span class="badge badge-purple">Filing-Backed</span>
+            <span id="gap-cached-badge" class="badge badge-purple hidden">&#9889; Cached</span>
+          </div>
+          <div id="gap-loading" class="loading-area hidden">
+            <div class="spinner"></div>
+            <p>Fetching filings, extracting pain points, clustering gaps, analyzing structural constraints&hellip;</p>
+          </div>
+          <p id="gap-status" class="compare-status-text"></p>
+
+          <!-- Summaries -->
+          <div id="gap-summary-section" class="hidden">
+            <div class="gap-summary-grid">
+              <div class="overall-answer-card">
+                <h3 class="gap-summary-label">Industry Summary</h3>
+                <p id="gap-industry-summary" class="overall-answer-summary"></p>
+              </div>
+              <div class="overall-answer-card">
+                <h3 class="gap-summary-label">Market Structure</h3>
+                <p id="gap-market-structure" class="overall-answer-summary"></p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Opportunity Memos — primary output -->
+          <div id="gap-memos-section" class="hidden">
+            <div class="panel-header">
+              <h3>Ranked Opportunity Memos</h3>
+              <span class="badge badge-yellow">Hypothesis &mdash; Not Validation</span>
+            </div>
+            <p class="panel-desc" style="margin-bottom:12px">Founder-oriented, filing-grounded opportunity memos. Each memo explains who owns the pain, how urgent it appears, why incumbents are stuck, what kind of company could address it, and why it still may be a bad business.</p>
+            <div id="gap-memos-list" class="gap-hypotheses-list"></div>
+          </div>
+
+          <!-- Gap Clusters — supporting evidence -->
+          <div id="gap-clusters-section" class="hidden">
+            <div class="panel-header">
+              <h3>Underlying Gap Clusters</h3>
+              <span class="badge badge-blue">Evidence Backbone</span>
+            </div>
+            <p class="panel-desc" style="margin-bottom:12px">These shared market problems are the evidence base behind the memos above. Every cluster requires evidence from at least 2 companies and shows the structural constraints that shape the opportunity.</p>
+            <div id="gap-clusters-list" class="gap-clusters-list"></div>
+          </div>
+
+          <!-- Coverage -->
+          <div id="gap-coverage-section" class="hidden">
+            <h3>Coverage &amp; Caveats</h3>
+            <ul id="gap-coverage-list" class="deep-dive-gaps"></ul>
+          </div>
+        </section>
+
+      </div><!-- /#gap-mode -->
 
     </section>
 

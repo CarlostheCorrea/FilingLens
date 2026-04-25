@@ -6,7 +6,7 @@ The agent uses MCP tools via mcp_client.py — never calls edgar_client directly
 import json
 import uuid
 from openai import AsyncOpenAI
-from config import OPENAI_API_KEY, OPENAI_MODEL, SCOPE_PROPOSAL_SYSTEM_PROMPT, ANSWERING_SYSTEM_PROMPT
+from config import OPENAI_API_KEY, OPENAI_MODEL, SCOPE_PROPOSAL_SYSTEM_PROMPT, ANSWERING_SYSTEM_PROMPT, MARKET_GAP_SCOPE_SYSTEM_PROMPT
 from mcp_client import get_mcp_client
 from models import ScopeProposal, Company, AnswerResponse, Claim
 import rag_pipeline
@@ -189,6 +189,71 @@ async def propose_scope(query: str) -> ScopeProposal:
         proposal_id=f"scope_{uuid.uuid4().hex[:8]}",
         companies=[],
         form_types=["10-K"],
+        date_range=["2022-01-01", "2025-12-31"],
+        overall_rationale="Scope proposal could not be completed after tool calls.",
+    )
+
+
+async def propose_gap_scope(query: str) -> ScopeProposal:
+    """Scope proposal optimised for market gap discovery: broader coverage, annual filings."""
+    messages = [
+        {"role": "system", "content": MARKET_GAP_SCOPE_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"{query}\n\n"
+                "Use the tools to discover a representative cross-section of companies in this industry, "
+                "then return a JSON scope proposal with fields: companies (list of {ticker, name, cik, rationale}), "
+                "form_types, date_range ([start, end] as YYYY-MM-DD), overall_rationale."
+            ),
+        },
+    ]
+
+    max_rounds = 6
+    for _ in range(max_rounds):
+        response = await _openai.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            tools=SCOPE_TOOLS,
+            tool_choice="auto",
+            response_format={"type": "json_object"},
+        )
+
+        msg = response.choices[0].message
+        messages.append(msg)
+
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                tool_result = await _run_tool(tc.function.name, json.loads(tc.function.arguments))
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": tool_result,
+                })
+        else:
+            raw = json.loads(msg.content or "{}")
+            companies = [
+                Company(
+                    ticker=c.get("ticker", ""),
+                    name=c.get("name", ""),
+                    cik=str(c.get("cik", "")),
+                    rationale=c.get("rationale", ""),
+                )
+                for c in raw.get("companies", [])
+            ]
+            proposal_id = f"gap_scope_{uuid.uuid4().hex[:8]}"
+            return ScopeProposal(
+                proposal_id=proposal_id,
+                companies=companies,
+                form_types=raw.get("form_types", ["10-K", "20-F"]),
+                date_range=raw.get("date_range", ["2022-01-01", "2025-12-31"]),
+                overall_rationale=raw.get("overall_rationale", ""),
+            )
+
+    return ScopeProposal(
+        proposal_id=f"gap_scope_{uuid.uuid4().hex[:8]}",
+        companies=[],
+        form_types=["10-K", "20-F"],
         date_range=["2022-01-01", "2025-12-31"],
         overall_rationale="Scope proposal could not be completed after tool calls.",
     )

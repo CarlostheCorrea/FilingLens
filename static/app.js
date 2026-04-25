@@ -41,26 +41,21 @@ const show = id => $(id) && $(id).classList.remove('hidden');
 const hide = id => $(id) && $(id).classList.add('hidden');
 
 function switchMode(mode) {
-  const researchEl = $('research-mode');
-  const compareEl = $('compare-mode');
-  const changeEl = $('change-mode');
-  const btnResearch = $('mode-btn-research');
-  const btnCompare = $('mode-btn-compare');
-  const btnChange = $('mode-btn-change');
+  const modes = ['research', 'compare', 'change', 'gap'];
+  modes.forEach(m => {
+    const el = $(`${m}-mode`);
+    const btn = $(`mode-btn-${m}`);
+    if (el) el.classList.toggle('hidden', m !== mode);
+    if (btn) btn.classList.toggle('active', m === mode);
+  });
   const tagline = $('mode-tagline');
-
-  if (researchEl) researchEl.classList.toggle('hidden', mode !== 'research');
-  if (compareEl)  compareEl.classList.toggle('hidden', mode !== 'compare');
-  if (changeEl) changeEl.classList.toggle('hidden', mode !== 'change');
-  if (btnResearch) btnResearch.classList.toggle('active', mode === 'research');
-  if (btnCompare)  btnCompare.classList.toggle('active', mode === 'compare');
-  if (btnChange)  btnChange.classList.toggle('active', mode === 'change');
   if (tagline) {
-    tagline.textContent = mode === 'research'
-      ? 'Ask questions across SEC filings for a set of companies'
-      : mode === 'compare'
-      ? 'Side-by-side analysis of two companies using their filings'
-      : 'Track how one company’s filing language changes across time';
+    tagline.textContent = {
+      research: 'Ask questions across SEC filings for a set of companies',
+      compare:  'Side-by-side analysis of two companies using their filings',
+      change:   'Track how one company’s filing language changes across time',
+      gap:      'Find structural pain points across an industry and identify where incumbents are stuck',
+    }[mode] || '';
   }
 }
 
@@ -1750,6 +1745,391 @@ async function clearData() {
   $('change-date-end').value = changeEnd;
   state.changeDateRange = [changeStart, changeEnd];
 })();
+
+/* ═══════════════════════════════════════════
+   MARKET GAP DISCOVERY
+   ═══════════════════════════════════════════ */
+const gapState = {
+  proposalId: null,
+  companies: [],
+  formTypes: ['10-K', '20-F'],
+  dateRange: [yearsAgo(3), today()],
+  result: null,
+};
+
+function setGapTimePreset(years) {
+  if (years === 'custom') {
+    $('gap-date-start').focus();
+  } else {
+    $('gap-date-start').value = yearsAgo(years);
+    $('gap-date-end').value   = today();
+    gapState.dateRange = [$('gap-date-start').value, $('gap-date-end').value];
+  }
+  document.querySelectorAll('#gap-scope-panel .time-preset-btn').forEach(btn => {
+    btn.classList.toggle('active',
+      (years === 'custom' && btn.textContent === 'Custom') ||
+      (years !== 'custom' && btn.textContent === `${years}Y`)
+    );
+  });
+}
+
+function renderGapFormTypeChips() {
+  const ALL = ['10-K', '10-Q', '8-K', '20-F', '6-K'];
+  const container = $('gap-form-types-editor');
+  container.innerHTML = '';
+  const row = document.createElement('div');
+  row.className = 'form-type-chips';
+  ALL.forEach(ft => {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (gapState.formTypes.includes(ft) ? ' active' : '');
+    chip.textContent = ft;
+    chip.onclick = () => {
+      chip.classList.toggle('active');
+      if (chip.classList.contains('active')) gapState.formTypes.push(ft);
+      else gapState.formTypes = gapState.formTypes.filter(t => t !== ft);
+    };
+    row.appendChild(chip);
+  });
+  container.appendChild(row);
+}
+
+function renderGapCompanyGrid() {
+  const grid = $('gap-company-list');
+  grid.innerHTML = '';
+  $('gap-company-count').textContent = gapState.companies.length;
+  if (!gapState.companies.length) {
+    grid.innerHTML = '<p class="empty-state">No companies in scope.</p>';
+    return;
+  }
+  gapState.companies.forEach((c, i) => {
+    const card = document.createElement('div');
+    card.className = 'company-card';
+    card.innerHTML = `
+      <button class="remove-btn" onclick="removeGapCompany(${i})">&#x2715;</button>
+      <div class="ticker">${c.ticker || '—'}</div>
+      <div class="company-name">${c.name || ''}</div>
+      ${c.rationale ? `<div class="rationale">${c.rationale}</div>` : ''}
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function removeGapCompany(idx) {
+  const r = gapState.companies.splice(idx, 1)[0];
+  renderGapCompanyGrid();
+  log(`Removed ${r.ticker} from gap scope`, 'warn');
+}
+
+async function addGapCompany() {
+  const ticker = $('gap-add-ticker-input').value.trim().toUpperCase();
+  if (!ticker) return;
+  if (gapState.companies.find(c => c.ticker === ticker)) { alert(`${ticker} already in scope.`); return; }
+  $('gap-add-ticker-input').value = '';
+  gapState.companies.push({ ticker, name: ticker, cik: '', rationale: 'Resolving…' });
+  renderGapCompanyGrid();
+  try {
+    const res = await fetch(`/api/scope/resolve/${encodeURIComponent(ticker)}`);
+    const info = res.ok ? await res.json() : {};
+    const idx = gapState.companies.findIndex(c => c.ticker === ticker);
+    if (idx !== -1) {
+      gapState.companies[idx] = {
+        ticker,
+        name: info.name || ticker,
+        cik: info.cik || '',
+        rationale: info.found ? 'Manually added.' : 'CIK not found — will be skipped.',
+      };
+      renderGapCompanyGrid();
+      log(`Added ${ticker} (${info.name || '?'}) to gap scope`, info.found ? 'success' : 'warn');
+    }
+  } catch (_) {
+    const idx = gapState.companies.findIndex(c => c.ticker === ticker);
+    if (idx !== -1) gapState.companies[idx].rationale = 'Manually added (CIK unresolved).';
+    renderGapCompanyGrid();
+  }
+}
+
+function rejectGapScope() {
+  hide('gap-scope-panel');
+  gapState.proposalId = null;
+  gapState.companies = [];
+  log('Gap scope rejected', 'warn');
+}
+
+async function proposeGapScope() {
+  const query = $('gap-query-input').value.trim();
+  if (!query) { alert('Describe an industry or sector first.'); return; }
+
+  const btn = $('gap-propose-btn');
+  btn.disabled = true;
+  btn.textContent = 'Discovering companies…';
+  log('Proposing gap scope for: ' + query.slice(0, 60), 'info');
+
+  try {
+    const res = await fetch('/api/scope/propose-gap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    const data = await res.json();
+
+    gapState.proposalId = data.proposal_id;
+    gapState.companies  = data.companies.map(c => ({ ...c }));
+    gapState.formTypes  = [...data.form_types];
+    gapState.dateRange  = [...data.date_range];
+
+    $('gap-scope-rationale').textContent = data.overall_rationale;
+    $('gap-date-start').value = data.date_range[0] || '';
+    $('gap-date-end').value   = data.date_range[1] || '';
+
+    renderGapFormTypeChips();
+    renderGapCompanyGrid();
+    show('gap-scope-panel');
+    $('gap-scope-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    log(`Gap scope: ${data.companies.length} companies proposed`, 'success');
+  } catch (err) {
+    log('Gap scope error: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Discover Companies';
+  }
+}
+
+async function runMarketGap(forceRefresh = false) {
+  const query = $('gap-query-input').value.trim();
+  if (!query) { alert('Enter an industry description.'); return; }
+  if (!gapState.companies.length) { alert('No companies in scope.'); return; }
+  if (!gapState.formTypes.length) { alert('Select at least one filing type.'); return; }
+  const dr = [$('gap-date-start').value, $('gap-date-end').value];
+  if (!dr[0] || !dr[1]) { alert('Set a date range.'); return; }
+
+  show('gap-results-panel');
+  show('gap-loading');
+  hide('gap-summary-section');
+  hide('gap-memos-section');
+  hide('gap-clusters-section');
+  hide('gap-coverage-section');
+  hide('gap-cached-badge');
+  $('gap-status').textContent = 'Analyzing market gaps…';
+  $('gap-results-panel').scrollIntoView({ behavior: 'smooth' });
+  log(`Running market gap analysis${forceRefresh ? ' (refresh)' : ''}…`, 'info');
+
+  try {
+    const res = await fetch(`/api/market-gap${forceRefresh ? '?refresh=true' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        companies: gapState.companies,
+        form_types: gapState.formTypes,
+        filing_date_range: dr,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    const data = await res.json();
+    gapState.result = data;
+    $('gap-status').textContent = '';
+
+    if (data.from_cache) {
+      show('gap-cached-badge');
+      log('Market gap served from cache ⚡', 'success');
+    } else {
+      hide('gap-cached-badge');
+      log(`Market gap complete: ${data.gap_clusters.length} clusters, ${(data.opportunity_memos || []).length} memos`, 'success');
+    }
+    renderMarketGap(data);
+  } catch (err) {
+    hide('gap-loading');
+    $('gap-status').textContent = '';
+    log('Market gap error: ' + err.message, 'error');
+  }
+}
+
+function renderMarketGap(data) {
+  hide('gap-loading');
+
+  $('gap-industry-summary').textContent   = data.industry_summary || '';
+  $('gap-market-structure').textContent   = data.market_structure_summary || '';
+  show('gap-summary-section');
+
+  const memos = data.opportunity_memos || [];
+  if (memos.length) {
+    $('gap-memos-list').innerHTML = memos.map(memo => buildOpportunityMemoCard(memo, data.gap_clusters || [])).join('');
+    show('gap-memos-section');
+  } else {
+    hide('gap-memos-section');
+  }
+
+  const clusters = data.gap_clusters || [];
+  if (clusters.length) {
+    $('gap-clusters-list').innerHTML = clusters.map(buildGapClusterCard).join('');
+    show('gap-clusters-section');
+  } else {
+    hide('gap-clusters-section');
+  }
+
+  const notes = data.coverage_notes || [];
+  if (notes.length) {
+    $('gap-coverage-list').innerHTML = notes.map(n => `<li>${n}</li>`).join('');
+    show('gap-coverage-section');
+  } else {
+    hide('gap-coverage-section');
+  }
+}
+
+function buildGapClusterCard(cluster) {
+  const freqPct = Math.round((cluster.frequency / Math.max(cluster.total_companies, 1)) * 100);
+  const confClass = { high: 'conf-high', medium: 'conf-medium', low: 'conf-low' }[cluster.confidence] || 'conf-medium';
+  const stuckConf = cluster.incumbents_stuck_confidence || 'low';
+  const stuckLabel = {
+    high: '🔒 Strong lock-in',
+    medium: '⚠️ Partial constraint',
+    low: '❓ Weak constraint',
+    insufficient: '✗ No clear structural barrier',
+  }[stuckConf] || stuckConf;
+  const stuckClass = {
+    high: 'stuck-high',
+    medium: 'stuck-medium',
+    low: 'stuck-low',
+    insufficient: 'stuck-none',
+  }[stuckConf] || 'stuck-low';
+
+  const tickers = (cluster.company_tickers || []).map(t => `<span class="scope-chip">${t}</span>`).join('');
+  const financial = cluster.financial_scale_estimate
+    ? `<div class="gap-meta-item"><span class="gap-meta-label">Financial scale</span><span class="gap-meta-value">${cluster.financial_scale_estimate}</span></div>`
+    : '';
+  const buyerOwners = (cluster.buyer_owners || []).length
+    ? `<div class="gap-meta-item"><span class="gap-meta-label">Buyer owner</span><span class="gap-meta-value">${cluster.buyer_owners.join(', ')}</span></div>`
+    : '';
+  const timing = cluster.urgency_level || cluster.persistence_level
+    ? `<div class="gap-meta-item"><span class="gap-meta-label">Urgency / persistence</span><span class="gap-meta-value">${cluster.urgency_level || '—'} / ${cluster.persistence_level || '—'}</span></div>`
+    : '';
+
+  const painEvidence = buildEvidenceDisclosure(
+    (cluster.pain_points || []).map(pp => `
+      <div class="deep-dive-evidence-item">
+        <div class="deep-dive-evidence-meta">
+          ${pp.company_ticker} &bull; ${pp.form_type} &bull; ${pp.filing_date} &bull; ${pp.category} &bull; severity: ${pp.severity}
+          ${edgarUrl(pp.cik, pp.accession_number) ? `<a class="sec-link" href="${edgarUrl(pp.cik, pp.accession_number)}" target="_blank" rel="noopener noreferrer">SEC ↗</a>` : ''}
+        </div>
+        <div class="deep-dive-evidence-text">${pp.text}</div>
+        <div class="gap-point-meta">Owner: ${pp.buyer_owner_hint || 'unknown'} &bull; Recurrence: ${pp.recurrence_hint || 'unclear'} &bull; Chunks: ${(pp.chunk_ids || []).join(', ')}</div>
+      </div>
+    `),
+    `Show ${cluster.evidence_count} pain point${cluster.evidence_count !== 1 ? 's' : ''}`
+  );
+  const constraints = buildEvidenceDisclosure([
+    ...(cluster.hard_constraints || []).map(item => `<div class="gap-constraint-item"><span class="gap-constraint-kind">Hard</span><span>${item}</span></div>`),
+    ...(cluster.soft_constraints || []).map(item => `<div class="gap-constraint-item"><span class="gap-constraint-kind soft">Soft</span><span>${item}</span></div>`),
+  ], 'Show structural constraints');
+  const caveats = (cluster.disconfirming_evidence || []).length
+    ? `<ul class="failure-modes-list">${cluster.disconfirming_evidence.map(item => `<li>${item}</li>`).join('')}</ul>`
+    : '';
+
+  return `
+    <article class="gap-cluster-card gap-conf-${cluster.confidence}">
+      <div class="gap-cluster-header">
+        <div class="gap-cluster-title-row">
+          <span class="gap-cluster-theme">${cluster.theme}</span>
+          <span class="confidence-badge ${confClass}">${cluster.confidence}</span>
+        </div>
+        <div class="gap-freq-row">
+          <div class="gap-freq-bar-wrap">
+            <div class="gap-freq-bar" style="width:${freqPct}%"></div>
+          </div>
+          <span class="gap-freq-label">${cluster.frequency}/${cluster.total_companies} companies &bull; ${freqPct}%</span>
+        </div>
+      </div>
+      <p class="gap-cluster-desc">${cluster.description}</p>
+      <div class="gap-meta-row">
+        <div class="gap-meta-item"><span class="gap-meta-label">Latest filing</span><span class="gap-meta-value">${cluster.latest_filing_date || '—'}</span></div>
+        ${financial}
+        ${buyerOwners}
+        ${timing}
+        <div class="gap-meta-item"><span class="gap-meta-label">Score</span><span class="gap-meta-value">${cluster.cluster_score.toFixed(2)}</span></div>
+      </div>
+      <div class="gap-companies-row">${tickers}</div>
+      ${painEvidence}
+      <div class="gap-stuck-block ${stuckClass}">
+        <div class="gap-stuck-label">${stuckLabel}</div>
+        <div class="gap-stuck-reason">${cluster.incumbents_stuck_reason || 'No analysis available.'}</div>
+      </div>
+      ${constraints}
+      ${cluster.why_now ? `<div class="opp-section"><div class="opp-section-label">Why now</div><p>${cluster.why_now}</p></div>` : ''}
+      ${caveats ? `<div class="opp-section"><div class="opp-section-label">Caveats</div>${caveats}</div>` : ''}
+    </article>
+  `;
+}
+
+function buildOpportunityMemoCard(memo, clusters) {
+  const cluster = (clusters || []).find(item => item.cluster_id === memo.target_cluster_id) || null;
+  const statusMeta = {
+    strong:               { label: '● Strong',               cls: 'opp-strong' },
+    plausible:            { label: '● Plausible',            cls: 'opp-plausible' },
+    speculative:          { label: '◐ Speculative',          cls: 'opp-speculative' },
+    no_clear_opportunity: { label: '○ No Clear Entrant Case', cls: 'opp-none' },
+  }[memo.opportunity_status] || { label: memo.opportunity_status, cls: 'opp-speculative' };
+
+  const failureModes = (memo.why_this_may_fail || []).map(f => `<li>${f}</li>`).join('');
+  const scoreItems = [
+    ['Score', memo.opportunity_score?.toFixed ? memo.opportunity_score.toFixed(2) : memo.opportunity_score],
+    ['Type', memo.opportunity_type?.replace(/_/g, ' ') || 'other'],
+    ['Buyer', memo.buyer_owner || 'unknown'],
+    ['Severity', memo.pain_severity || 'moderate'],
+    ['Urgency', memo.urgency_level || 'medium'],
+    ['Adoption', memo.adoption_difficulty || 'medium'],
+  ].map(([label, value]) => `
+    <div class="opp-score-item">
+      <span class="opp-score-label">${label}</span>
+      <span class="opp-score-value">${value}</span>
+    </div>
+  `).join('');
+  const evidenceItems = (cluster?.pain_points || [])
+    .filter(pp => (memo.evidence_chunk_ids || []).some(cid => (pp.chunk_ids || []).includes(cid)))
+    .map(pp => `
+      <div class="deep-dive-evidence-item">
+        <div class="deep-dive-evidence-meta">
+          ${pp.company_ticker} &bull; ${pp.form_type} &bull; ${pp.filing_date}
+          ${edgarUrl(pp.cik, pp.accession_number) ? `<a class="sec-link" href="${edgarUrl(pp.cik, pp.accession_number)}" target="_blank" rel="noopener noreferrer">SEC ↗</a>` : ''}
+        </div>
+        <div class="deep-dive-evidence-text">${pp.text}</div>
+        <div class="gap-point-meta">Chunks: ${(pp.chunk_ids || []).join(', ')}</div>
+      </div>
+    `);
+  const evidence = buildEvidenceDisclosure(evidenceItems, 'Show memo evidence', 'No memo evidence captured.');
+
+  return `
+    <article class="gap-opportunity-card ${statusMeta.cls}">
+      <div class="opp-header">
+        <span class="opp-status-badge ${statusMeta.cls}">${statusMeta.label}</span>
+        <span class="opp-title">${memo.title}</span>
+      </div>
+      <p class="opp-rationale">Filing-grounded opportunity memo &bull; hypothesis, not validation</p>
+      <p class="opp-status-note">${memo.status_rationale || ''}</p>
+      <div class="opp-score-grid">${scoreItems}</div>
+      <div class="opp-section">
+        <div class="opp-section-label">Problem</div>
+        <p>${memo.problem || ''}</p>
+      </div>
+      <p class="opp-description">${memo.thesis || ''}</p>
+      <div class="opp-section">
+        <div class="opp-section-label">Why incumbents are stuck</div>
+        <p>${memo.why_incumbents_are_stuck || 'No clear structural barrier identified.'}</p>
+      </div>
+      ${memo.why_now ? `
+        <div class="opp-section">
+          <div class="opp-section-label">Why now</div>
+          <p>${memo.why_now}</p>
+        </div>
+      ` : ''}
+      <div class="opp-section">
+        <div class="opp-section-label">Why this may fail</div>
+        <ul class="failure-modes-list">${failureModes}</ul>
+      </div>
+      ${evidence}
+    </article>
+  `;
+}
 
 /* ── Keyboard shortcuts ── */
 document.addEventListener('keydown', e => {

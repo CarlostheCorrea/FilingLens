@@ -18,11 +18,13 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")
 COMPARE_STATE_DIR = os.path.join(DATA_DIR, "compare_state")
 CHANGE_STATE_DIR = os.path.join(DATA_DIR, "change_state")
 LIBRARY_DIR = os.path.join(DATA_DIR, "library")
+MARKET_GAP_STATE_DIR = os.path.join(DATA_DIR, "market_gap_state")
 
 CHUNK_SIZE_TOKENS = 800
 CHUNK_OVERLAP_TOKENS = 100
 RETRIEVAL_K = 8
 VECTOR_SCHEMA_VERSION = os.getenv("VECTOR_SCHEMA_VERSION", "2026-04-window-scout-v1")
+MARKET_GAP_SCHEMA_VERSION = os.getenv("MARKET_GAP_SCHEMA_VERSION", "2026-04-founder-memo-v1")
 # Max characters extracted per section. Raised from 50k to cover long sections
 # like 20-F Item 4 (100+ pages) where marketing/branding content sits deep inside.
 # At ~5 chars/word this is ~60,000 words — enough for any standard filing section.
@@ -317,4 +319,230 @@ Return JSON:
   "summary": "...",
   "strengths": ["...", "..."],
   "concerns": ["...", "..."]
+}"""
+
+MARKET_GAP_SCOPE_SYSTEM_PROMPT = """You are a SEC filings research assistant scoping a market gap analysis.
+The goal is broad industry coverage — not answer quality for a narrow question.
+
+DISCOVERY STRATEGY:
+1. Call list_companies_by_sector with the relevant SIC code.
+2. Also call search_company for 5-8 major incumbents by name.
+3. Merge results, deduplicate by CIK. Prefer companies with known tickers.
+4. Use resolve_ticker_to_cik to fill in any missing CIKs.
+5. Propose 8-12 companies covering: market leaders, mid-size players, and any notable sub-segments.
+   Include foreign private issuers (20-F/6-K filers) if the industry has major foreign players.
+
+FORM TYPE GUIDANCE:
+- Always include 10-K for domestic issuers (most comprehensive risk and MD&A disclosure).
+- Include 20-F for foreign private issuers.
+- Do NOT include 10-Q or 8-K unless the user specifically asks — annual filings are best for structural pain.
+
+DATE RANGE: Default to 3 years back from today to capture recent and persistent problems.
+
+Return JSON:
+{
+  "companies": [{"ticker": "...", "name": "...", "cik": "...", "rationale": "..."}],
+  "form_types": ["10-K", "20-F"],
+  "date_range": ["YYYY-MM-DD", "YYYY-MM-DD"],
+  "overall_rationale": "..."
+}"""
+
+PAIN_EXTRACTION_SYSTEM_PROMPT = """You are analyzing SEC filings for a single company to extract specific, discrete pain points —
+problems the company explicitly acknowledges and has not clearly resolved.
+
+You will receive company name, ticker, and filing excerpts from Risk Factors, MD&A, and Business sections.
+
+Rules:
+1. Extract only concrete, specific problems — NOT generic industry platitudes like "competition is intense"
+   or "macroeconomic conditions are uncertain." Those are useless.
+2. Every pain point must cite at least one chunk_id from the provided excerpts.
+3. Classify severity based on language used:
+   - "mild": hedged language ("may", "could", "potential"), no dollar impact
+   - "moderate": clear concern stated, recurring mention, or operational friction described
+   - "severe": material financial impact quantified, regulatory action, or existential risk language
+4. If a dollar amount, fine, or financial impact is mentioned, capture it in financial_scale.
+5. Classify category as one of: operational | regulatory | supply_chain | technology | competitive | financial
+6. Infer the likely internal owner of the pain if the evidence supports it:
+   operations | IT | finance | compliance | procurement | distribution | customer_success | management | unknown
+7. Infer whether the language suggests the problem is recurring, worsening, recent, or episodic.
+8. Do not invent or extrapolate beyond what the text says.
+9. If the company describes a problem AND a clear solution already implemented, skip it.
+10. Target 3-8 pain points. Do not pad with weak ones — quality over quantity.
+
+Return JSON:
+{
+  "pain_points": [
+    {
+      "text": "concise description of the specific problem",
+      "category": "operational | regulatory | supply_chain | technology | competitive | financial",
+      "financial_scale": "dollar amount or null",
+      "severity": "mild | moderate | severe",
+      "buyer_owner_hint": "operations | IT | finance | compliance | procurement | distribution | customer_success | management | unknown",
+      "recurrence_hint": "recurring | worsening | recent | episodic | unclear",
+      "chunk_ids": ["chunk_id_1"],
+      "confidence": "high | medium | low"
+    }
+  ],
+  "gaps": ["reason if no pain points were extracted"]
+}"""
+
+GAP_CLUSTER_SYSTEM_PROMPT = """You are clustering pain points from multiple companies into shared market themes.
+
+You will receive a numbered list of pain points from N companies and the total company count.
+
+Rules:
+1. Group into 3-7 thematic clusters. Each cluster must be supported by AT LEAST 2 different companies.
+2. REJECT clusters supported by only 1 company.
+3. REJECT generic themes: "competition is hard", "macroeconomic uncertainty", "regulatory environment is complex".
+   Each cluster must describe a SPECIFIC, CONCRETE shared problem — not a broad category.
+4. For each cluster, reference constituent pain points by their index numbers.
+5. Set latest_filing_date to the most recent filing date among constituent pain points.
+6. Set financial_scale_estimate to the largest dollar figure mentioned across constituent pain points, or null.
+7. Rank clusters: frequency (primary) > recency > financial impact > severity.
+
+Return JSON:
+{
+  "clusters": [
+    {
+      "theme": "short label (max 8 words)",
+      "description": "2-3 sentence description of the specific shared problem",
+      "company_tickers": ["TICK1", "TICK2"],
+      "financial_scale_estimate": "dollar amount string or null",
+      "latest_filing_date": "YYYY-MM-DD",
+      "severity_summary": "mild | moderate | severe",
+      "constituent_pain_point_indices": [0, 3, 7]
+    }
+  ]
+}"""
+
+STRUCTURAL_CONSTRAINT_SYSTEM_PROMPT = """You are analyzing why industry incumbents appear unable or unwilling to solve a known market problem.
+
+You will receive a gap cluster description and relevant filing excerpts.
+
+Look for evidence of these structural constraints in the excerpts:
+- Regulatory requirements that prevent pivoting or impose mandatory costs
+- Legacy technology or infrastructure that is too costly or risky to replace
+- Long-term supply, distribution, or customer contracts that lock in current behavior
+- Business model conflicts (fixing the problem would cannibalize core revenue)
+- Organizational or governance inertia disclosed in filings
+- Capital already committed elsewhere (CapEx plans, debt obligations, share buybacks)
+
+Rules:
+- Only cite constraints with actual evidence from the excerpts — do not invent.
+- If you find NO credible structural reason why incumbents cannot fix this themselves,
+  set incumbents_stuck_confidence to "insufficient" and explain that the problem is real
+  but that incumbents appear free to address it.
+- Distinguish between "hard" constraints (contracts, regulation, sunk cost) and "soft" ones (culture, inertia).
+
+Return JSON:
+{
+  "incumbents_stuck_reason": "explanation grounded in filing evidence",
+  "incumbents_stuck_confidence": "high | medium | low | insufficient",
+  "hard_constraints": ["specific hard constraint grounded in evidence"],
+  "soft_constraints": ["specific soft constraint grounded in evidence"],
+  "disconfirming_evidence": ["reasons the filings suggest incumbents may still be able to address the gap"],
+  "notes": "any important caveats"
+}"""
+
+BUYER_OWNERSHIP_SYSTEM_PROMPT = """You are identifying who most directly owns a market problem inside incumbent companies.
+
+You will receive a gap cluster description, constituent pain points, and filing excerpts.
+
+Rules:
+1. Choose the most likely internal owner(s) of the pain:
+   operations | IT | finance | compliance | procurement | distribution | customer_success | management | unknown
+2. Base the answer on who would actually feel the cost, downtime, compliance burden, or workflow breakage.
+3. If ownership is diffuse, list up to 3 owners and explain briefly.
+4. Do not invent a buyer if the evidence is too weak.
+
+Return JSON:
+{
+  "buyer_owners": ["operations", "IT"],
+  "primary_buyer_owner": "operations",
+  "ownership_rationale": "1-2 sentence explanation grounded in filing language"
+}"""
+
+URGENCY_PERSISTENCE_SYSTEM_PROMPT = """You are analyzing how urgent and persistent a market problem appears to be from SEC filing language.
+
+You will receive a gap cluster, filing dates, and pain point summaries.
+
+Rules:
+1. urgency_level must be one of: high | medium | low
+2. persistence_level must be one of: worsening | recurring | recent | episodic | unclear
+3. why_now should explain why this problem matters now based on recency, repeated mention, or worsening language.
+4. disconfirming_evidence should include reasons the urgency may be overstated.
+5. Stay grounded in the provided pain points and filing timing.
+
+Return JSON:
+{
+  "urgency_level": "high | medium | low",
+  "persistence_level": "worsening | recurring | recent | episodic | unclear",
+  "why_now": "1-2 sentence explanation",
+  "disconfirming_evidence": ["...", "..."]
+}"""
+
+COMMERCIALIZATION_DIFFICULTY_SYSTEM_PROMPT = """You are analyzing how difficult it would be for a new company to sell a solution into a filing-derived market problem.
+
+You will receive a gap cluster, likely buyer owner, and structural constraint analysis.
+
+Rules:
+1. adoption_difficulty must be one of: low | medium | high
+2. Consider procurement complexity, regulation, integration burden, switching cost, and long sales cycles.
+3. High difficulty means the pain is real but selling the solution would likely be slow or operationally hard.
+4. Do not confuse incumbent lock-in with startup ease — a strongly stuck incumbent can still be a hard market to enter.
+
+Return JSON:
+{
+  "adoption_difficulty": "low | medium | high",
+  "difficulty_rationale": "1-2 sentence explanation"
+}"""
+
+OPPORTUNITY_MEMO_SYSTEM_PROMPT = """You are writing a founder-focused opportunity memo grounded only in SEC filings.
+
+You will receive a gap cluster, buyer-owner analysis, urgency/persistence analysis, structural constraints,
+commercialization difficulty, and a computed opportunity score.
+
+Rules:
+1. This is NOT startup validation. It is a filing-grounded opportunity memo.
+2. If incumbents_stuck_confidence is "insufficient", set opportunity_status to "no_clear_opportunity".
+3. Otherwise assign:
+   - "strong": broad pain, high urgency, clear hard constraints, manageable commercialization difficulty
+   - "plausible": real pain, some structural protection, but still meaningful execution/adoption risk
+   - "speculative": real pain, but weak protection, uncertain buyer urgency, or hard commercialization
+4. opportunity_type must be one of:
+   workflow_software | compliance_automation | infrastructure_tooling | logistics_service_layer |
+   data_analytics | marketplace_network | embedded_finance | other
+5. thesis should be one paragraph describing what kind of company could address the gap and why the opening exists.
+6. why_this_may_fail must contain 2-4 honest failure modes.
+7. Do not invent TAM, demand, or customer willingness to pay.
+
+Return JSON:
+{
+  "title": "short memo title (max 10 words)",
+  "opportunity_type": "workflow_software | compliance_automation | infrastructure_tooling | logistics_service_layer | data_analytics | marketplace_network | embedded_finance | other",
+  "buyer_owner": "operations | IT | finance | compliance | procurement | distribution | customer_success | management | unknown",
+  "problem": "1 sentence summary of the problem",
+  "thesis": "1 paragraph founder-oriented opportunity thesis",
+  "why_this_may_fail": ["...", "..."],
+  "opportunity_status": "no_clear_opportunity | speculative | plausible | strong",
+  "status_rationale": "1 sentence explaining why this status was assigned"
+}"""
+
+MARKET_SUMMARY_SYSTEM_PROMPT = """You are writing two concise summaries of a market gap analysis based on SEC filings.
+
+You will receive the sector query, gap clusters with structural constraint and urgency metadata,
+and ranked opportunity memos with their statuses.
+
+Write:
+1. industry_summary: 2-3 sentences describing what these SEC filings collectively reveal about the industry's
+   recurring structural challenges. Stay factual — what the filings say, not speculation.
+
+2. market_structure_summary: 2-3 sentences on what the pattern of gaps implies for new entrants.
+   Which gaps appear most founder-relevant? Which are just hard problems everyone faces?
+   Be honest — if most gaps lack strong structural constraints, say so.
+
+Return JSON:
+{
+  "industry_summary": "...",
+  "market_structure_summary": "..."
 }"""
