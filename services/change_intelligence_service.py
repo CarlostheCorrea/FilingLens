@@ -15,6 +15,9 @@ from config import (
     OPENAI_WORKER_MODEL,
     VECTOR_SCHEMA_VERSION,
 )
+import cost_tracker
+from models import CostSummary
+from services.judge_service import judge_change
 from edgar_client import resolve_ticker_to_cik
 import logging_utils
 from mcp_client import get_mcp_client
@@ -403,8 +406,15 @@ async def change_intelligence(req: ChangeIntelligenceRequest, force_refresh: boo
             data = json.load(handle)
         if data.get("retrieval_version") == VECTOR_SCHEMA_VERSION:
             data["from_cache"] = True
-            return ChangeIntelligenceResponse(**data), True
+            cached = ChangeIntelligenceResponse(**data)
+            if cached.judge_evaluation is None:
+                cached.judge_evaluation = await judge_change(cached, req.query)
+                with open(cache_path, "w") as handle:
+                    json.dump({**cached.model_dump(), "from_cache": False}, handle)
+            cached.from_cache = True
+            return cached, True
 
+    cost_tracker.start_tracking()
     company = _company_from_ticker(req.ticker)
     if not company.cik:
         raise ValueError(f"Could not resolve a CIK for ticker {req.ticker}.")
@@ -480,6 +490,9 @@ async def change_intelligence(req: ChangeIntelligenceRequest, force_refresh: boo
         stock_series=stock_series,
         filing_events=filing_events,
     )
+
+    result.judge_evaluation = await judge_change(result, req.query)
+    result.cost_summary = CostSummary(**cost_tracker.get_summary())
 
     with open(cache_path, "w") as handle:
         json.dump(result.model_dump(), handle)

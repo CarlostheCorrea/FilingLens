@@ -34,10 +34,20 @@ from config import (
 )
 import logging_utils
 
+import cost_tracker
+
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
 _enc = tiktoken.get_encoding("cl100k_base")
 _openai = OpenAI(api_key=OPENAI_API_KEY)
+
+
+def _embed(inputs: list[str]) -> list[list[float]]:
+    """Embed a list of strings, record token usage, return vectors."""
+    response = _openai.embeddings.create(model=OPENAI_EMBEDDING_MODEL, input=inputs)
+    if response.usage:
+        cost_tracker.record_embedding(OPENAI_EMBEDDING_MODEL, response.usage.total_tokens)
+    return [item.embedding for item in response.data]
 _chroma = chromadb.PersistentClient(
     path=CHROMA_DIR,
     settings=ChromaSettings(anonymized_telemetry=False),
@@ -342,10 +352,7 @@ class EphemeralStore:
             batch = chunks[i : i + batch_size]
             texts_to_embed = [_context_prefix(c) + c.text for c in batch]
             texts_to_store = [c.text for c in batch]
-            response = _openai.embeddings.create(
-                model=OPENAI_EMBEDDING_MODEL, input=texts_to_embed
-            )
-            vectors = [item.embedding for item in response.data]
+            vectors = _embed(texts_to_embed)
             self._col.upsert(
                 ids=[c.chunk_id for c in batch],
                 embeddings=vectors,
@@ -362,10 +369,7 @@ class EphemeralStore:
         total = self._col.count()
         if total == 0:
             return []
-        response = _openai.embeddings.create(
-            model=OPENAI_EMBEDDING_MODEL, input=[query]
-        )
-        query_vec = response.data[0].embedding
+        query_vec = _embed([query])[0]
         where = _build_where(None, tickers)
         safe_k = min(k, total)
         try:
@@ -402,8 +406,7 @@ def filter_sections_by_query(
     if not non_empty or not query.strip():
         return filing_text_dict
 
-    q_resp = _openai.embeddings.create(model=OPENAI_EMBEDDING_MODEL, input=[query])
-    q_vec = q_resp.data[0].embedding
+    q_vec = _embed([query])[0]
 
     windows: list[dict] = []
     preview_inputs: list[str] = []
@@ -422,8 +425,7 @@ def filter_sections_by_query(
     if not preview_inputs:
         return filing_text_dict
 
-    s_resp = _openai.embeddings.create(model=OPENAI_EMBEDDING_MODEL, input=preview_inputs)
-    s_vecs = [item.embedding for item in s_resp.data]
+    s_vecs = _embed(preview_inputs)
     for idx, window in enumerate(windows):
         window["score"] = _dot(q_vec, s_vecs[idx])
         window["section_focus_hint"] = _focus_hint(window["text"], window["start"], window["end"])
@@ -553,11 +555,7 @@ def embed_chunks(chunks: list[Chunk], collection_name: str = "sec_filings") -> N
         texts_to_embed = [_context_prefix(c) + c.text for c in batch]
         texts_to_store = [c.text for c in batch]
 
-        response = _openai.embeddings.create(
-            model=OPENAI_EMBEDDING_MODEL,
-            input=texts_to_embed,
-        )
-        vectors = [item.embedding for item in response.data]
+        vectors = _embed(texts_to_embed)
 
         collection.upsert(
             ids=[c.chunk_id for c in batch],
@@ -620,11 +618,7 @@ def retrieve(
 
     collection = _get_collection(collection_name)
 
-    response = _openai.embeddings.create(
-        model=OPENAI_EMBEDDING_MODEL,
-        input=[query],
-    )
-    query_vec = response.data[0].embedding
+    query_vec = _embed([query])[0]
 
     where = _build_where(filters, tickers, accession_numbers)
     safe_k = min(k, total)

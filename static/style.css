@@ -889,6 +889,29 @@ input[type="text"]:focus { border-color: var(--accent); }
   padding: 0 16px 8px;
 }
 
+/* ── Cost Row ── */
+.cost-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin-bottom: 4px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.cost-icon { font-size: 14px; flex-shrink: 0; }
+.cost-total {
+  font-weight: 600;
+  color: #15803d;
+  white-space: nowrap;
+}
+.cost-detail {
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .judge-card {
   border: 1px solid #ddd6fe;
   border-radius: var(--radius-sm);

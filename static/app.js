@@ -805,6 +805,8 @@ function renderAnswer(data) {
   const judge = ans.judge_evaluation || null;
   const claims = getAuditClaims(data);
 
+  renderCostRow(ans.cost_summary || null, 'answer');
+
   if (overall.summary || keyPoints.length) {
     show('overall-answer-section');
     $('overall-answer-summary').textContent = overall.summary || '';
@@ -867,6 +869,64 @@ function renderAnswer(data) {
     $('claims-audit-details').open = false;
     show('claims-section');
   }
+}
+
+/* ── Cost row renderer — shared across all 4 features ── */
+function renderCostRow(cost, prefix) {
+  const rowId = `${prefix}-cost-row`;
+  if (!$(rowId)) return;
+  if (!cost || !cost.cost_usd) { hide(rowId); return; }
+
+  const usd = cost.cost_usd < 0.001
+    ? `$${cost.cost_usd.toFixed(5)}`
+    : `$${cost.cost_usd.toFixed(4)}`;
+
+  const fmtN = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
+  $(`${prefix}-cost-total`).textContent = `${usd} estimated`;
+  $(`${prefix}-cost-detail`).textContent =
+    `${cost.llm_calls} LLM call${cost.llm_calls !== 1 ? 's' : ''} · ` +
+    `${fmtN(cost.prompt_tokens)} prompt · ` +
+    `${fmtN(cost.completion_tokens)} completion · ` +
+    `${fmtN(cost.embedding_tokens)} embedding tokens`;
+
+  show(rowId);
+}
+
+/* ── Generic judge panel renderer for Compare / Change / Market Gap ── */
+function renderJudgePanel(judge, prefix) {
+  const sectionId = `${prefix}-judge-section`;
+  if (!$(sectionId)) return;
+  if (!judge) { hide(sectionId); return; }
+
+  const verdictClass = `judge-verdict-${judge.overall_verdict || 'mixed'}`;
+  const riskClass    = `judge-risk-${judge.overclaiming_risk || 'medium'}`;
+
+  $(`${prefix}-judge-verdict`).className   = `judge-verdict ${verdictClass}`;
+  $(`${prefix}-judge-verdict`).textContent = `Verdict: ${(judge.overall_verdict || 'mixed').replace('_', ' ')}`;
+  $(`${prefix}-judge-summary`).textContent  = judge.summary || '';
+
+  $(`${prefix}-judge-overclaiming`).className   = `judge-risk ${riskClass}`;
+  $(`${prefix}-judge-overclaiming`).textContent = `Overclaiming risk: ${judge.overclaiming_risk || 'medium'}`;
+
+  $(`${prefix}-judge-score-grid`).innerHTML = [
+    ['Helpfulness',      judge.helpfulness],
+    ['Clarity',          judge.clarity],
+    ['Grounding',        judge.grounding],
+    ['Citation quality', judge.citation_quality],
+  ].map(([label, score]) => `
+    <div class="judge-score-card">
+      <span class="judge-score-label">${label}</span>
+      <span class="judge-score-value">${score}/5</span>
+    </div>
+  `).join('');
+
+  $(`${prefix}-judge-strengths`).innerHTML =
+    (judge.strengths || []).map(item => `<li>${item}</li>`).join('') || '<li>No strengths noted.</li>';
+  $(`${prefix}-judge-concerns`).innerHTML  =
+    (judge.concerns  || []).map(item => `<li>${item}</li>`).join('') || '<li>No major concerns noted.</li>';
+
+  show(sectionId);
 }
 
 function buildEvidenceDisclosure(items, label, emptyLabel = '') {
@@ -1115,6 +1175,9 @@ function renderCompare(data) {
   $('compare-similarities').innerHTML = (data.similarities || []).map(item => `<li>${item}</li>`).join('');
   $('compare-differences').innerHTML = (data.differences || []).map(item => `<li>${item}</li>`).join('');
   show('compare-summary-section');
+
+  renderJudgePanel(data.judge_evaluation || null, 'compare');
+  renderCostRow(data.cost_summary || null, 'compare');
 
   const comparisons = data.company_comparisons || [];
   $('compare-company-list').innerHTML = comparisons.map(buildCompareCompanyCard).join('');
@@ -1422,6 +1485,9 @@ function renderChangeIntelligence(data) {
 
   $('change-overall-summary').textContent = data.overall_summary || '';
   show('change-summary-section');
+
+  renderJudgePanel(data.judge_evaluation || null, 'change');
+  renderCostRow(data.cost_summary || null, 'change');
 
   const filingEvents = data.filing_events || [];
   if (filingEvents.length) {
@@ -2021,6 +2087,9 @@ function renderMarketGap(data) {
   $('gap-industry-summary').textContent   = data.industry_summary || '';
   $('gap-market-structure').textContent   = data.market_structure_summary || '';
   show('gap-summary-section');
+
+  renderJudgePanel(data.judge_evaluation || null, 'gap');
+  renderCostRow(data.cost_summary || null, 'gap');
 
   const memos = data.opportunity_memos || [];
   if (memos.length) {

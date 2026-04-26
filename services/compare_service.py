@@ -15,6 +15,9 @@ from config import (
     OPENAI_WORKER_MODEL,
     VECTOR_SCHEMA_VERSION,
 )
+import cost_tracker
+from models import CostSummary
+from services.judge_service import judge_compare
 from edgar_client import resolve_ticker_to_cik
 import logging_utils
 from mcp_client import get_mcp_client
@@ -338,8 +341,15 @@ async def compare_companies(req: CompareRequest, force_refresh: bool = False) ->
             data = json.load(handle)
         if data.get("retrieval_version") == VECTOR_SCHEMA_VERSION:
             data["from_cache"] = True
-            return CompareResponse(**data), True
+            cached = CompareResponse(**data)
+            if cached.judge_evaluation is None:
+                cached.judge_evaluation = await judge_compare(cached, req.query)
+                with open(cache_path, "w") as handle:
+                    json.dump({**cached.model_dump(), "from_cache": False}, handle)
+            cached.from_cache = True
+            return cached, True
 
+    cost_tracker.start_tracking()
     companies = [
         _company_from_ticker(req.ticker_a),
         _company_from_ticker(req.ticker_b),
@@ -420,6 +430,9 @@ async def compare_companies(req: CompareRequest, force_refresh: bool = False) ->
         stock_series=stock_series,
         filing_events=filing_events,
     )
+
+    result.judge_evaluation = await judge_compare(result, req.query)
+    result.cost_summary = CostSummary(**cost_tracker.get_summary())
 
     with open(cache_path, "w") as handle:
         json.dump(result.model_dump(), handle)

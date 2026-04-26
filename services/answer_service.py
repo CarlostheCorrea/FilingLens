@@ -3,8 +3,9 @@ import json
 import os
 
 from answer_workflow import run_answer_workflow
-from models import WorkflowAnswerResponse, WorkflowStage
+from models import CostSummary, WorkflowAnswerResponse, WorkflowStage
 from pydantic import ValidationError
+import cost_tracker
 import hitl
 from services.judge_service import judge_answer
 import logging_utils
@@ -94,12 +95,14 @@ async def answer(
         except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
             pass
 
+    cost_tracker.start_tracking()
     refreshed_accessions = await _ensure_vectors_current(proposal_id, companies)
 
     # ── Run supervisor workflow ────────────────────────────────────────────────
     result = await run_answer_workflow(proposal_id, query, companies)
     result.retrieval_version = VECTOR_SCHEMA_VERSION
     result.answer.judge_evaluation = await judge_answer(result)
+    result.answer.cost_summary = CostSummary(**cost_tracker.get_summary())
     if refreshed_accessions:
         result.workflow.stages.insert(0, WorkflowStage(
             name="refresh_index",

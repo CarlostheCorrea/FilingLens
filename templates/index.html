@@ -299,6 +299,11 @@
               </div>
             </div>
           </div>
+          <div id="answer-cost-row" class="cost-row hidden">
+            <span class="cost-icon">💰</span>
+            <span id="answer-cost-total" class="cost-total"></span>
+            <span id="answer-cost-detail" class="cost-detail"></span>
+          </div>
           <div id="company-deep-dives-section" class="hidden">
             <div class="panel-header">
               <h3>Company Deep Dives</h3>
@@ -422,6 +427,37 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div id="compare-judge-section" class="hidden">
+            <div class="panel-header">
+              <h3>LLM Judge</h3>
+              <span class="badge badge-purple">Automated Review</span>
+            </div>
+            <div class="judge-card">
+              <div class="judge-header-row">
+                <div>
+                  <div id="compare-judge-verdict" class="judge-verdict"></div>
+                  <p id="compare-judge-summary" class="judge-summary"></p>
+                </div>
+                <div id="compare-judge-overclaiming" class="judge-risk"></div>
+              </div>
+              <div id="compare-judge-score-grid" class="judge-score-grid"></div>
+              <div class="judge-columns">
+                <div>
+                  <div class="compare-subtitle">Strengths</div>
+                  <ul id="compare-judge-strengths" class="judge-list"></ul>
+                </div>
+                <div>
+                  <div class="compare-subtitle">Concerns</div>
+                  <ul id="compare-judge-concerns" class="judge-list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="compare-cost-row" class="cost-row hidden">
+            <span class="cost-icon">💰</span>
+            <span id="compare-cost-total" class="cost-total"></span>
+            <span id="compare-cost-detail" class="cost-detail"></span>
           </div>
           <div id="compare-company-section" class="hidden">
             <div class="panel-header">
@@ -556,6 +592,37 @@
             <div class="overall-answer-card">
               <p id="change-overall-summary" class="overall-answer-summary"></p>
             </div>
+          </div>
+          <div id="change-judge-section" class="hidden">
+            <div class="panel-header">
+              <h3>LLM Judge</h3>
+              <span class="badge badge-purple">Automated Review</span>
+            </div>
+            <div class="judge-card">
+              <div class="judge-header-row">
+                <div>
+                  <div id="change-judge-verdict" class="judge-verdict"></div>
+                  <p id="change-judge-summary" class="judge-summary"></p>
+                </div>
+                <div id="change-judge-overclaiming" class="judge-risk"></div>
+              </div>
+              <div id="change-judge-score-grid" class="judge-score-grid"></div>
+              <div class="judge-columns">
+                <div>
+                  <div class="compare-subtitle">Strengths</div>
+                  <ul id="change-judge-strengths" class="judge-list"></ul>
+                </div>
+                <div>
+                  <div class="compare-subtitle">Concerns</div>
+                  <ul id="change-judge-concerns" class="judge-list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="change-cost-row" class="cost-row hidden">
+            <span class="cost-icon">💰</span>
+            <span id="change-cost-total" class="cost-total"></span>
+            <span id="change-cost-detail" class="cost-detail"></span>
           </div>
           <div id="change-filings-section" class="hidden">
             <div class="panel-header">
@@ -703,6 +770,40 @@
                 <p id="gap-market-structure" class="overall-answer-summary"></p>
               </div>
             </div>
+          </div>
+
+          <!-- LLM Judge -->
+          <div id="gap-judge-section" class="hidden">
+            <div class="panel-header">
+              <h3>LLM Judge</h3>
+              <span class="badge badge-purple">Automated Review</span>
+            </div>
+            <div class="judge-card">
+              <div class="judge-header-row">
+                <div>
+                  <div id="gap-judge-verdict" class="judge-verdict"></div>
+                  <p id="gap-judge-summary" class="judge-summary"></p>
+                </div>
+                <div id="gap-judge-overclaiming" class="judge-risk"></div>
+              </div>
+              <div id="gap-judge-score-grid" class="judge-score-grid"></div>
+              <div class="judge-columns">
+                <div>
+                  <div class="compare-subtitle">Strengths</div>
+                  <ul id="gap-judge-strengths" class="judge-list"></ul>
+                </div>
+                <div>
+                  <div class="compare-subtitle">Concerns</div>
+                  <ul id="gap-judge-concerns" class="judge-list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="gap-cost-row" class="cost-row hidden">
+            <span class="cost-icon">💰</span>
+            <span id="gap-cost-total" class="cost-total"></span>
+            <span id="gap-cost-detail" class="cost-detail"></span>
           </div>
 
           <!-- Opportunity Memos — primary output -->

@@ -24,9 +24,12 @@ from config import (
     VECTOR_SCHEMA_VERSION,
 )
 from mcp_client import get_mcp_client
+import cost_tracker
+from services.judge_service import judge_market_gap
 from models import (
     Chunk,
     Company,
+    CostSummary,
     GapCluster,
     MarketGapRequest,
     MarketGapResponse,
@@ -502,8 +505,15 @@ async def analyze_market_gap(
             and data.get("schema_version") == MARKET_GAP_SCHEMA_VERSION
         ):
             data["from_cache"] = True
-            return MarketGapResponse(**data), True
+            cached = MarketGapResponse(**data)
+            if cached.judge_evaluation is None:
+                cached.judge_evaluation = await judge_market_gap(cached, req.query)
+                with open(cache_path, "w") as f:
+                    json.dump({**cached.model_dump(), "from_cache": False}, f)
+            cached.from_cache = True
+            return cached, True
 
+    cost_tracker.start_tracking()
     run_id = f"gap_{uuid.uuid4().hex[:10]}"
     mcp = get_mcp_client()
     coverage_notes: list[str] = []
@@ -719,6 +729,9 @@ async def analyze_market_gap(
         opportunity_hypotheses=[],
         coverage_notes=coverage_notes,
     )
+
+    result.judge_evaluation = await judge_market_gap(result, req.query)
+    result.cost_summary = CostSummary(**cost_tracker.get_summary())
 
     with open(cache_path, "w") as f:
         json.dump(result.model_dump(), f)

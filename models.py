@@ -97,6 +97,15 @@ class ClaimsAuditPayload(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
 
 
+class CostSummary(BaseModel):
+    cost_usd: float = 0.0
+    llm_calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    embedding_tokens: int = 0
+    total_tokens: int = 0
+
+
 class JudgeEvaluation(BaseModel):
     helpfulness: int
     clarity: int
@@ -115,6 +124,7 @@ class StructuredAnswerPayload(BaseModel):
     claims_audit: ClaimsAuditPayload
     coverage_notes: list[str] = Field(default_factory=list)
     judge_evaluation: Optional[JudgeEvaluation] = None
+    cost_summary: Optional[CostSummary] = None
 
 
 class WorkflowAnswerResponse(BaseModel):
@@ -250,6 +260,8 @@ class CompareResponse(BaseModel):
     differences: list[str] = Field(default_factory=list)
     stock_series: list[StockSeries] = Field(default_factory=list)
     filing_events: list[FilingEvent] = Field(default_factory=list)
+    judge_evaluation: Optional[JudgeEvaluation] = None
+    cost_summary: Optional[CostSummary] = None
 
 
 class ChangeIntelligenceRequest(BaseModel):
@@ -305,6 +317,8 @@ class ChangeIntelligenceResponse(BaseModel):
     change_cards: list[ChangeCard] = Field(default_factory=list)
     stock_series: list[StockSeries] = Field(default_factory=list)
     filing_events: list[FilingEvent] = Field(default_factory=list)
+    judge_evaluation: Optional[JudgeEvaluation] = None
+    cost_summary: Optional[CostSummary] = None
 
 
 # ── Market Gap Discovery ──────────────────────────────────────────────────────
@@ -401,3 +415,5 @@ class MarketGapResponse(BaseModel):
     opportunity_memos: list[OpportunityMemo] = Field(default_factory=list)
     opportunity_hypotheses: list[OpportunityHypothesis] = Field(default_factory=list)
     coverage_notes: list[str] = Field(default_factory=list)
+    judge_evaluation: Optional[JudgeEvaluation] = None
+    cost_summary: Optional[CostSummary] = None

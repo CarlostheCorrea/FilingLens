@@ -32,6 +32,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 from openai import AsyncOpenAI, RateLimitError
 
+import cost_tracker
 import rag_pipeline
 from config import (
     OPENAI_API_KEY,
@@ -92,6 +93,12 @@ async def _create_json_completion(*, model: str, messages: list[dict], max_retri
                 messages=messages,
                 response_format={"type": "json_object"},
             )
+            if response.usage:
+                cost_tracker.record_llm(
+                    model,
+                    response.usage.prompt_tokens,
+                    response.usage.completion_tokens,
+                )
             return json.loads(response.choices[0].message.content or "{}")
         except RateLimitError as error:
             last_error = error
