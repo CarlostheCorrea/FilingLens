@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+import re
 
 from answer_workflow import _create_json_completion
 from config import (
@@ -15,6 +16,7 @@ from config import (
     MARKET_GAP_SCHEMA_VERSION,
     MARKET_GAP_STATE_DIR,
     MARKET_SUMMARY_SYSTEM_PROMPT,
+    OPPORTUNITY_MEMO_CHAT_SYSTEM_PROMPT,
     OPPORTUNITY_MEMO_SYSTEM_PROMPT,
     OPENAI_MODEL,
     OPENAI_WORKER_MODEL,
@@ -34,6 +36,10 @@ from models import (
     MarketGapRequest,
     MarketGapResponse,
     OpportunityMemo,
+    OpportunityMemoChatRequest,
+    OpportunityMemoChatResponse,
+    OpportunityMemoCitation,
+    OpportunityMemoChatTurn,
     PainPoint,
 )
 import rag_pipeline
@@ -166,6 +172,13 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
     return ordered
 
 
+def _trim_text(text: str, limit: int = 650) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1].rstrip() + "…"
+
+
 def _normalize_buyer_owner(value: str) -> str:
     clean = str(value or "").strip()
     return clean if clean in _BUYER_OWNERS else "unknown"
@@ -189,6 +202,11 @@ def _normalize_status(value: str) -> str:
 def _normalize_opportunity_type(value: str) -> str:
     clean = str(value or "").strip()
     return clean if clean in _OPPORTUNITY_TYPES else "other"
+
+
+def _normalize_support_level(value: str) -> str:
+    clean = str(value or "").strip()
+    return clean if clean in {"supported", "partial", "unsupported"} else "unsupported"
 
 
 def _persistence_score(value: str) -> float:
@@ -487,6 +505,259 @@ async def _generate_summaries(
             {"role": "system", "content": MARKET_SUMMARY_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(payload, indent=2)},
         ],
+    )
+
+
+def _load_cached_market_gap_run(run_id: str) -> MarketGapResponse | None:
+    for filename in os.listdir(MARKET_GAP_STATE_DIR):
+        if not filename.endswith(".json"):
+            continue
+        path = os.path.join(MARKET_GAP_STATE_DIR, filename)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        if data.get("run_id") == run_id:
+            return MarketGapResponse(**data)
+    return None
+
+
+def _memo_cluster_evidence(memo: OpportunityMemo, cluster: GapCluster) -> list[OpportunityMemoCitation]:
+    citations: list[OpportunityMemoCitation] = []
+    allowed_ids = set(memo.evidence_chunk_ids or [])
+
+    for pain_point in cluster.pain_points:
+        matched_ids = [cid for cid in pain_point.chunk_ids if not allowed_ids or cid in allowed_ids]
+        if not matched_ids:
+            continue
+        excerpt = _trim_text(pain_point.text)
+        for chunk_id in matched_ids:
+            citations.append(OpportunityMemoCitation(
+                chunk_id=chunk_id,
+                company_ticker=pain_point.company_ticker,
+                form_type=pain_point.form_type,
+                filing_date=pain_point.filing_date,
+                accession_number=pain_point.accession_number,
+                cik=pain_point.cik,
+                excerpt=excerpt,
+            ))
+
+    if citations:
+        return citations[:10]
+
+    fallback: list[OpportunityMemoCitation] = []
+    for pain_point in cluster.pain_points:
+        if not pain_point.chunk_ids:
+            continue
+        fallback.append(OpportunityMemoCitation(
+            chunk_id=pain_point.chunk_ids[0],
+            company_ticker=pain_point.company_ticker,
+            form_type=pain_point.form_type,
+            filing_date=pain_point.filing_date,
+            accession_number=pain_point.accession_number,
+            cik=pain_point.cik,
+            excerpt=_trim_text(pain_point.text),
+        ))
+    return fallback[:8]
+
+
+def _history_citation_ids(history: list[OpportunityMemoChatTurn]) -> set[str]:
+    seen: set[str] = set()
+    for turn in history:
+        for chunk_id in getattr(turn, "citation_chunk_ids", []) or []:
+            clean = str(chunk_id or "").strip()
+            if clean:
+                seen.add(clean)
+    return seen
+
+
+_STOPWORDS = {
+    "the", "and", "for", "that", "with", "this", "from", "what", "who", "why", "how",
+    "are", "was", "were", "have", "has", "had", "into", "about", "their", "there",
+    "they", "them", "would", "could", "should", "does", "did", "than", "then", "like",
+    "kind", "idea", "memo", "market", "company", "companies",
+}
+
+
+def _query_terms(*texts: str) -> list[str]:
+    terms: list[str] = []
+    for text in texts:
+        for term in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", str(text or "").lower()):
+            if term in _STOPWORDS:
+                continue
+            if term not in terms:
+                terms.append(term)
+    return terms
+
+
+def _score_citation(
+    citation: OpportunityMemoCitation,
+    terms: list[str],
+    memo_evidence_ids: set[str],
+) -> float:
+    haystack = " ".join([
+        citation.company_ticker,
+        citation.form_type,
+        citation.excerpt,
+    ]).lower()
+    matches = sum(1 for term in terms if term in haystack)
+    density = (matches / max(len(terms), 1)) if terms else 0.0
+    memo_bonus = 0.2 if citation.chunk_id in memo_evidence_ids else 0.0
+    return density + memo_bonus
+
+
+def _select_chat_citations(
+    memo: OpportunityMemo,
+    cluster: GapCluster,
+    question: str,
+    history: list[OpportunityMemoChatTurn],
+    limit: int = 6,
+) -> tuple[list[OpportunityMemoCitation], set[str]]:
+    citations = _memo_cluster_evidence(memo, cluster)
+    prior_ids = _history_citation_ids(history)
+    if not citations:
+        return [], prior_ids
+
+    terms = _query_terms(question, memo.problem, cluster.theme)
+    memo_evidence_ids = set(memo.evidence_chunk_ids or [])
+    scored = []
+    for index, citation in enumerate(citations):
+        score = _score_citation(citation, terms, memo_evidence_ids)
+        is_new = citation.chunk_id not in prior_ids
+        sort_score = score + (0.25 if is_new else 0.0)
+        scored.append((sort_score, score, is_new, index, citation))
+
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    selected = [item[4] for item in scored[:limit]]
+
+    if not any(c.chunk_id not in prior_ids for c in selected):
+        unseen = [item[4] for item in scored if item[4].chunk_id not in prior_ids]
+        if unseen:
+            selected = [unseen[0], *selected[: max(limit - 1, 0)]]
+
+    deduped: list[OpportunityMemoCitation] = []
+    seen_ids: set[str] = set()
+    for citation in selected:
+        if citation.chunk_id in seen_ids:
+            continue
+        seen_ids.add(citation.chunk_id)
+        deduped.append(citation)
+    return deduped[:limit], prior_ids
+
+
+async def answer_opportunity_memo_chat(req: OpportunityMemoChatRequest) -> OpportunityMemoChatResponse:
+    cached = _load_cached_market_gap_run(req.run_id)
+    if cached is None:
+        raise ValueError("Market gap run not found.")
+
+    memo = next((item for item in cached.opportunity_memos if item.memo_id == req.memo_id), None)
+    if memo is None:
+        raise ValueError("Opportunity memo not found.")
+
+    cluster = next((item for item in cached.gap_clusters if item.cluster_id == memo.target_cluster_id), None)
+    if cluster is None:
+        raise ValueError("Supporting gap cluster not found.")
+
+    citations, prior_ids = _select_chat_citations(memo, cluster, req.question, req.history)
+    if not citations:
+        return OpportunityMemoChatResponse(
+            run_id=req.run_id,
+            memo_id=req.memo_id,
+            answer="The current filings do not provide memo-specific evidence to answer that question.",
+            support_level="unsupported",
+            citations=[],
+            note="No memo evidence was available in the cached run.",
+        )
+
+    evidence_payload = [
+        {
+            "chunk_id": item.chunk_id,
+            "company_ticker": item.company_ticker,
+            "form_type": item.form_type,
+            "filing_date": item.filing_date,
+            "excerpt": item.excerpt,
+            "previously_cited": item.chunk_id in prior_ids,
+        }
+        for item in citations
+    ]
+    history_payload = [
+        {
+            "role": turn.role,
+            "content": turn.content,
+            "citation_chunk_ids": getattr(turn, "citation_chunk_ids", []) or [],
+        }
+        for turn in req.history[-6:]
+        if turn.role in {"user", "assistant"} and str(turn.content or "").strip()
+    ]
+    memo_payload = {
+        "title": memo.title,
+        "problem": memo.problem,
+        "thesis": memo.thesis,
+        "opportunity_status": memo.opportunity_status,
+        "status_rationale": memo.status_rationale,
+        "opportunity_type": memo.opportunity_type,
+        "buyer_owner": memo.buyer_owner,
+        "pain_severity": memo.pain_severity,
+        "urgency_level": memo.urgency_level,
+        "hard_constraint_strength": memo.hard_constraint_strength,
+        "adoption_difficulty": memo.adoption_difficulty,
+        "why_incumbents_are_stuck": memo.why_incumbents_are_stuck,
+        "why_now": memo.why_now,
+        "why_this_may_fail": memo.why_this_may_fail,
+    }
+    cluster_payload = {
+        "theme": cluster.theme,
+        "description": cluster.description,
+        "frequency": f"{cluster.frequency}/{cluster.total_companies}",
+        "buyer_owners": cluster.buyer_owners,
+        "hard_constraints": cluster.hard_constraints,
+        "soft_constraints": cluster.soft_constraints,
+        "disconfirming_evidence": cluster.disconfirming_evidence,
+    }
+
+    raw = await _create_json_completion(
+        model=OPENAI_WORKER_MODEL,
+        messages=[
+            {"role": "system", "content": OPPORTUNITY_MEMO_CHAT_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "memo": memo_payload,
+                        "gap_cluster": cluster_payload,
+                        "evidence": evidence_payload,
+                        "history": history_payload,
+                        "question": req.question,
+                    },
+                    indent=2,
+                ),
+            },
+        ],
+    )
+
+    valid_ids = {item.chunk_id for item in citations}
+    chosen_ids = [cid for cid in raw.get("citation_chunk_ids", []) if cid in valid_ids]
+    if not chosen_ids and raw.get("support_level", "unsupported") != "unsupported":
+        chosen_ids = [item.chunk_id for item in citations[:2]]
+
+    chosen_citations = [item for item in citations if item.chunk_id in chosen_ids]
+    support_level = _normalize_support_level(raw.get("support_level", "unsupported"))
+    has_new_citation = any(item.chunk_id not in prior_ids for item in chosen_citations)
+    note = raw.get("note", "").strip()
+
+    if chosen_citations and not has_new_citation:
+        chosen_citations = []
+        fallback_note = "No additional memo evidence beyond earlier excerpts directly supported this follow-up."
+        note = f"{fallback_note} {note}".strip() if note else fallback_note
+
+    return OpportunityMemoChatResponse(
+        run_id=req.run_id,
+        memo_id=req.memo_id,
+        answer=raw.get("answer", "").strip() or "The current filings do not support a stronger conclusion.",
+        support_level=support_level,
+        citations=chosen_citations,
+        note=note,
     )
 
 

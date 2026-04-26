@@ -1940,6 +1940,7 @@ const gapState = {
   formTypes: ['10-K', '20-F'],
   dateRange: [yearsAgo(3), today()],
   result: null,
+  memoChats: {},
 };
 
 function setGapTimePreset(years) {
@@ -2118,6 +2119,7 @@ async function runMarketGap(forceRefresh = false) {
     if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
     const data = await res.json();
     gapState.result = data;
+    gapState.memoChats = {};
     $('gap-status').textContent = '';
 
     if (data.from_cache) {
@@ -2167,6 +2169,169 @@ function renderMarketGap(data) {
     show('gap-coverage-section');
   } else {
     hide('gap-coverage-section');
+  }
+}
+
+function getMemoChatState(memoId) {
+  if (!gapState.memoChats[memoId]) {
+    gapState.memoChats[memoId] = { messages: [], loading: false };
+  }
+  return gapState.memoChats[memoId];
+}
+
+function buildOpportunityMemoChatMarkup(memoId) {
+  const chat = getMemoChatState(memoId);
+  const messages = chat.messages || [];
+
+  const messageMarkup = messages.length
+    ? messages.map(message => {
+        if (message.role === 'user') {
+          return `
+            <div class="memo-chat-message memo-chat-user">
+              <div class="memo-chat-bubble">${escapeHtml(message.content)}</div>
+            </div>
+          `;
+        }
+
+        const citations = (message.citations || []).map(item => {
+          const url = edgarUrl(item.cik, item.accession_number);
+          return `
+            <div class="memo-chat-citation">
+              <div class="memo-chat-citation-meta">
+                ${escapeHtml(item.company_ticker)} &bull; ${escapeHtml(item.form_type)} &bull; ${escapeHtml(item.filing_date)}
+                ${url ? `<a class="sec-link" href="${url}" target="_blank" rel="noopener noreferrer">SEC ↗</a>` : ''}
+              </div>
+              <div class="memo-chat-citation-text">${escapeHtml(item.excerpt || '')}</div>
+              <div class="gap-point-meta">Chunk: ${escapeHtml(item.chunk_id || '')}</div>
+            </div>
+          `;
+        }).join('');
+
+        const note = message.note
+          ? `<div class="memo-chat-note">${escapeHtml(message.note)}</div>`
+          : '';
+        const supportClass = `memo-chat-support-${message.support_level || 'unsupported'}`;
+        const supportLabel = {
+          supported: 'Supported',
+          partial: 'Partially Supported',
+          unsupported: 'Not Supported by Current Filings',
+        }[message.support_level || 'unsupported'];
+
+        return `
+          <div class="memo-chat-message memo-chat-assistant">
+            <div class="memo-chat-bubble">
+              <div class="memo-chat-answer">${escapeHtml(message.content)}</div>
+              <div class="memo-chat-support ${supportClass}">${supportLabel}</div>
+              ${note}
+              ${citations ? `<div class="memo-chat-citations">${citations}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')
+    : `<div class="memo-chat-empty">Ask follow-up about this idea. The answer will stay grounded in this memo’s cited filing evidence.</div>`;
+
+  return `
+    <div class="memo-chat-shell">
+      <div class="memo-chat-thread">
+        ${messageMarkup}
+        ${chat.loading ? `<div class="memo-chat-loading">Answering from memo evidence…</div>` : ''}
+      </div>
+      <div class="memo-chat-input-row">
+        <textarea
+          id="memo-chat-input-${memoId}"
+          class="memo-chat-input"
+          rows="2"
+          placeholder="Ask follow-up about this idea"
+          onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendOpportunityMemoQuestion('${memoId}');}"
+        ></textarea>
+        <button class="btn btn-primary btn-sm memo-chat-send" onclick="sendOpportunityMemoQuestion('${memoId}')" ${chat.loading ? 'disabled' : ''}>Send</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderOpportunityMemoChat(memoId, options = {}) {
+  const { stickToBottom = false } = options;
+  const host = $(`memo-chat-${memoId}`);
+  if (!host) return;
+
+  const priorThread = host.querySelector('.memo-chat-thread');
+  const previousScrollTop = priorThread ? priorThread.scrollTop : 0;
+  const previousScrollHeight = priorThread ? priorThread.scrollHeight : 0;
+  const previousClientHeight = priorThread ? priorThread.clientHeight : 0;
+  const previousOffsetFromBottom = previousScrollHeight - previousScrollTop - previousClientHeight;
+
+  host.innerHTML = buildOpportunityMemoChatMarkup(memoId);
+
+  const nextThread = host.querySelector('.memo-chat-thread');
+  if (!nextThread) return;
+
+  if (stickToBottom) {
+    nextThread.scrollTop = nextThread.scrollHeight;
+    return;
+  }
+
+  if (!priorThread) return;
+
+  if (previousOffsetFromBottom <= 16) {
+    nextThread.scrollTop = nextThread.scrollHeight;
+  } else {
+    nextThread.scrollTop = Math.max(
+      0,
+      nextThread.scrollHeight - nextThread.clientHeight - previousOffsetFromBottom,
+    );
+  }
+}
+
+async function sendOpportunityMemoQuestion(memoId) {
+  if (!gapState.result?.run_id) return;
+  const input = $(`memo-chat-input-${memoId}`);
+  if (!input) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  const chat = getMemoChatState(memoId);
+  chat.messages.push({ role: 'user', content: question });
+  chat.loading = true;
+  renderOpportunityMemoChat(memoId, { stickToBottom: true });
+
+  try {
+    const res = await fetch('/api/market-gap/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_id: gapState.result.run_id,
+        memo_id: memoId,
+        question,
+        history: chat.messages.map(message => ({
+          role: message.role,
+          content: message.content,
+          citation_chunk_ids: message.citation_chunk_ids || [],
+        })),
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Server error');
+    const data = await res.json();
+    chat.messages.push({
+      role: 'assistant',
+      content: data.answer || '',
+      support_level: data.support_level || 'unsupported',
+      citations: data.citations || [],
+      citation_chunk_ids: (data.citations || []).map(item => item.chunk_id).filter(Boolean),
+      note: data.note || '',
+    });
+  } catch (err) {
+    chat.messages.push({
+      role: 'assistant',
+      content: 'The current filings do not support a stronger conclusion for that follow-up right now.',
+      support_level: 'unsupported',
+      citations: [],
+      citation_chunk_ids: [],
+      note: err.message,
+    });
+  } finally {
+    chat.loading = false;
+    renderOpportunityMemoChat(memoId, { stickToBottom: true });
   }
 }
 
@@ -2320,6 +2485,10 @@ function buildOpportunityMemoCard(memo, clusters) {
         <ul class="failure-modes-list">${failureModes}</ul>
       </div>
       ${evidence}
+      <div class="opp-section opp-chat-section">
+        <div class="opp-section-label">Ask follow-up about this idea</div>
+        <div id="memo-chat-${memo.memo_id}" class="memo-chat-container">${buildOpportunityMemoChatMarkup(memo.memo_id)}</div>
+      </div>
     </article>
   `;
 }

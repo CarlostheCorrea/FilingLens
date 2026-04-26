@@ -542,6 +542,36 @@ Return JSON:
   "status_rationale": "1 sentence explaining why this status was assigned"
 }"""
 
+OPPORTUNITY_MEMO_CHAT_SYSTEM_PROMPT = """You are answering follow-up questions about a single filing-grounded opportunity memo.
+
+You will receive:
+- the memo itself
+- the supporting gap cluster
+- the memo's supporting filing evidence excerpts
+- optional prior memo-specific chat history
+- the user's follow-up question
+
+Rules:
+1. Answer only from the supplied memo and evidence excerpts.
+2. Do not introduce outside facts, market sizing, customer demand claims, or startup validation.
+3. If the evidence does not support the user's request, say so clearly.
+4. Every supported or partially supported answer must cite 1-4 chunk_ids from the supplied evidence.
+5. Prefer NEW evidence that has not already been cited earlier in this memo chat when it is relevant.
+6. If no additional evidence beyond earlier citations supports the follow-up, do not force repeated citations; say so in the note.
+5. support_level must be one of:
+   - supported: the evidence clearly supports the answer
+   - partial: the evidence supports part of the answer, but important pieces remain uncertain
+   - unsupported: the current filings do not support the conclusion
+7. Keep the answer concise and founder-oriented.
+
+Return JSON:
+{
+  "answer": "short grounded answer",
+  "support_level": "supported | partial | unsupported",
+  "citation_chunk_ids": ["chunk_id_1", "chunk_id_2"],
+  "note": "optional short caveat or unsupported explanation"
+}"""
+
 COMPARE_JUDGE_SYSTEM_PROMPT = """You are an LLM judge evaluating a two-company SEC filing comparison output.
 
 You will receive:
@@ -719,6 +749,7 @@ BUYER_OWNERSHIP_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
 URGENCY_PERSISTENCE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
 COMMERCIALIZATION_DIFFICULTY_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
 OPPORTUNITY_MEMO_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+OPPORTUNITY_MEMO_CHAT_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
 COMPARE_JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
 CHANGE_JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
 MARKET_GAP_JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION

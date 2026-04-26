@@ -409,6 +409,38 @@ class OpportunityMemo(BaseModel):
     opportunity_score: float = 0.0
 
 
+class OpportunityMemoChatTurn(BaseModel):
+    role: str  # user | assistant
+    content: str
+    citation_chunk_ids: list[str] = Field(default_factory=list)
+
+
+class OpportunityMemoCitation(BaseModel):
+    chunk_id: str
+    company_ticker: str
+    form_type: str
+    filing_date: str
+    accession_number: str = ""
+    cik: str = ""
+    excerpt: str = ""
+
+
+class OpportunityMemoChatRequest(BaseModel):
+    run_id: str
+    memo_id: str
+    question: str
+    history: list[OpportunityMemoChatTurn] = Field(default_factory=list)
+
+
+class OpportunityMemoChatResponse(BaseModel):
+    run_id: str
+    memo_id: str
+    answer: str
+    support_level: str  # supported | partial | unsupported
+    citations: list[OpportunityMemoCitation] = Field(default_factory=list)
+    note: str = ""
+
+
 # ── Financial Table Extraction ────────────────────────────────────────────────
 
 class FinancialTable(BaseModel):
