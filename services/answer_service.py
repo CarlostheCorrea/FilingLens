@@ -8,6 +8,7 @@ from pydantic import ValidationError
 import cost_tracker
 import hitl
 from services.judge_service import judge_answer
+from services.ragas_service import evaluate_answer_ragas
 import logging_utils
 import rag_pipeline
 from config import DATA_DIR, VECTOR_SCHEMA_VERSION
@@ -85,8 +86,14 @@ async def answer(
                 raise ValueError("stale retrieval version")
             data["from_cache"] = True
             cached = WorkflowAnswerResponse(**data)
+            cache_updated = False
             if cached.answer.judge_evaluation is None:
                 cached.answer.judge_evaluation = await judge_answer(cached)
+                cache_updated = True
+            if cached.answer.ragas_evaluation is None:
+                cached.answer.ragas_evaluation = await evaluate_answer_ragas(cached)
+                cache_updated = True
+            if cache_updated:
                 with open(cache_path, "w") as f:
                     json.dump({**cached.model_dump(), "from_cache": False}, f)
                 hitl.save_answer(proposal_id, cached.model_dump(), answer_key="latest")
@@ -102,6 +109,7 @@ async def answer(
     result = await run_answer_workflow(proposal_id, query, companies)
     result.retrieval_version = VECTOR_SCHEMA_VERSION
     result.answer.judge_evaluation = await judge_answer(result)
+    result.answer.ragas_evaluation = await evaluate_answer_ragas(result)
     result.answer.cost_summary = CostSummary(**cost_tracker.get_summary())
     if refreshed_accessions:
         result.workflow.stages.insert(0, WorkflowStage(
@@ -131,6 +139,11 @@ async def answer(
         proposal_id,
         query,
         result.answer.judge_evaluation.model_dump() if result.answer.judge_evaluation else {},
+    )
+    logging_utils.log_ragas(
+        proposal_id,
+        query,
+        result.answer.ragas_evaluation.model_dump() if result.answer.ragas_evaluation else {},
     )
 
     return result, False

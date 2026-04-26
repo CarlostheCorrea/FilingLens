@@ -5,6 +5,7 @@ The agent uses MCP tools via mcp_client.py — never calls edgar_client directly
 
 import json
 import uuid
+from datetime import date
 from openai import AsyncOpenAI
 from config import OPENAI_API_KEY, OPENAI_MODEL, SCOPE_PROPOSAL_SYSTEM_PROMPT, ANSWERING_SYSTEM_PROMPT, MARKET_GAP_SCOPE_SYSTEM_PROMPT
 from mcp_client import get_mcp_client
@@ -126,6 +127,19 @@ async def _normalize_form_types(
     return normalized
 
 
+def _default_date_range() -> list[str]:
+    today_str = date.today().isoformat()
+    return ["2022-01-01", today_str]
+
+
+def _normalize_date_range(raw_date_range: list[str] | None) -> list[str]:
+    default_start, default_end = _default_date_range()
+    if not raw_date_range or len(raw_date_range) < 2:
+        return [default_start, default_end]
+    start = str(raw_date_range[0] or "").strip() or default_start
+    return [start, default_end]
+
+
 async def propose_scope(query: str) -> ScopeProposal:
     messages = [
         {"role": "system", "content": SCOPE_PROPOSAL_SYSTEM_PROMPT},
@@ -180,7 +194,7 @@ async def propose_scope(query: str) -> ScopeProposal:
                     companies,
                     raw.get("form_types", ["10-K"]),
                 ),
-                date_range=raw.get("date_range", ["2022-01-01", "2025-12-31"]),
+                date_range=_normalize_date_range(raw.get("date_range")),
                 overall_rationale=raw.get("overall_rationale", ""),
             )
 
@@ -189,7 +203,7 @@ async def propose_scope(query: str) -> ScopeProposal:
         proposal_id=f"scope_{uuid.uuid4().hex[:8]}",
         companies=[],
         form_types=["10-K"],
-        date_range=["2022-01-01", "2025-12-31"],
+        date_range=_default_date_range(),
         overall_rationale="Scope proposal could not be completed after tool calls.",
     )
 
@@ -246,7 +260,7 @@ async def propose_gap_scope(query: str) -> ScopeProposal:
                 proposal_id=proposal_id,
                 companies=companies,
                 form_types=raw.get("form_types", ["10-K", "20-F"]),
-                date_range=raw.get("date_range", ["2022-01-01", "2025-12-31"]),
+                date_range=_normalize_date_range(raw.get("date_range")),
                 overall_rationale=raw.get("overall_rationale", ""),
             )
 
@@ -254,7 +268,7 @@ async def propose_gap_scope(query: str) -> ScopeProposal:
         proposal_id=f"gap_scope_{uuid.uuid4().hex[:8]}",
         companies=[],
         form_types=["10-K", "20-F"],
-        date_range=["2022-01-01", "2025-12-31"],
+        date_range=_default_date_range(),
         overall_rationale="Scope proposal could not be completed after tool calls.",
     )
 

@@ -48,6 +48,11 @@
         <span class="mode-index">04</span>
         <span class="mode-label">Market Gap Discovery</span>
       </button>
+      <div class="mode-divider"></div>
+      <button class="mode-btn" id="mode-btn-financials" onclick="switchMode('financials')">
+        <span class="mode-index">05</span>
+        <span class="mode-label">Financial Data</span>
+      </button>
       <p class="mode-tagline" id="mode-tagline">
         Cross-company SEC research with reviewable evidence and production-style summaries
       </p>
@@ -296,6 +301,26 @@
                   <div class="compare-subtitle">Concerns</div>
                   <ul id="judge-concerns" class="judge-list"></ul>
                 </div>
+              </div>
+            </div>
+          </div>
+          <div id="ragas-section" class="hidden">
+            <div class="panel-header">
+              <h3>RAGAS</h3>
+              <span class="badge badge-blue">RAG Quality</span>
+            </div>
+            <div class="ragas-card">
+              <div class="ragas-header-row">
+                <div>
+                  <div id="ragas-status" class="ragas-status"></div>
+                  <p id="ragas-summary" class="ragas-summary"></p>
+                </div>
+                <div id="ragas-overall" class="ragas-overall-score"></div>
+              </div>
+              <div id="ragas-score-grid" class="ragas-score-grid"></div>
+              <div id="ragas-concerns-wrap" class="ragas-concerns-wrap hidden">
+                <div class="compare-subtitle">Watchpoints</div>
+                <ul id="ragas-concerns" class="judge-list"></ul>
               </div>
             </div>
           </div>
@@ -834,6 +859,50 @@
         </section>
 
       </div><!-- /#gap-mode -->
+
+      <!-- ══════════════════════════════════════════
+           FINANCIAL DATA MODE
+           ══════════════════════════════════════════ -->
+      <div id="financials-mode" class="hidden">
+
+        <!-- ── XBRL Key Metrics Lookup ── -->
+        <section class="card" id="financials-xbrl-panel">
+          <div class="panel-header">
+            <h2>Key Financial Metrics</h2>
+            <span class="badge badge-blue">XBRL · Machine-Readable</span>
+          </div>
+          <p class="panel-desc">Enter a ticker to pull annual key metrics (revenue, net income, EPS, assets, cash flows) directly from SEC EDGAR's machine-readable XBRL data — no parsing needed.</p>
+
+          <div class="financials-search-row">
+            <input type="text" id="xbrl-ticker-input" placeholder="Ticker (e.g. AAPL, MSFT, NVDA)" class="financials-input" />
+            <button class="btn btn-primary" onclick="fetchXBRL()">Fetch Metrics</button>
+          </div>
+          <div id="xbrl-status" class="status-text"></div>
+          <div id="xbrl-loading" class="loading-block hidden">
+            <div class="spinner"></div>
+            <span>Fetching XBRL data from SEC EDGAR…</span>
+          </div>
+
+          <!-- Results -->
+          <div id="xbrl-results" class="hidden">
+            <div class="panel-header" style="margin-top:16px">
+              <h3 id="xbrl-company-name"></h3>
+              <span class="badge badge-blue" id="xbrl-cik-badge"></span>
+            </div>
+
+            <div class="financials-category-tabs">
+              <button class="fin-tab-btn active" id="fin-tab-income" onclick="showXBRLCategory('income_statement')">Income</button>
+              <button class="fin-tab-btn" id="fin-tab-balance" onclick="showXBRLCategory('balance_sheet')">Balance Sheet</button>
+              <button class="fin-tab-btn" id="fin-tab-cash" onclick="showXBRLCategory('cash_flow')">Cash Flows</button>
+            </div>
+
+            <div id="xbrl-income-table" class="xbrl-table-wrap"></div>
+            <div id="xbrl-balance-table" class="xbrl-table-wrap hidden"></div>
+            <div id="xbrl-cash-table" class="xbrl-table-wrap hidden"></div>
+          </div>
+        </section>
+
+      </div><!-- /#financials-mode -->
 
     </section>
 

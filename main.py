@@ -14,6 +14,7 @@ from routes.verify import router as verify_router
 from routes.data import router as data_router
 from routes.library import router as library_router
 from routes.market_gap import router as market_gap_router
+from routes.financials import router as financials_router
 
 app = FastAPI(title="SEC Filing Intelligence Tool", version="1.0.0")
 
@@ -30,6 +31,7 @@ app.include_router(verify_router)
 app.include_router(data_router)
 app.include_router(library_router)
 app.include_router(market_gap_router)
+app.include_router(financials_router)
 
 
 @app.get("/", response_class=HTMLResponse)

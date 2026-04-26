@@ -115,6 +115,10 @@ class MCPClient:
             args["cik"] = cik
         return await self.call_tool("fetch_filing", args)
 
+    async def get_xbrl_facts(self, cik: str) -> dict:
+        result = await self.call_tool("get_xbrl_facts", {"cik": cik})
+        return result if isinstance(result, dict) else {}
+
     async def resolve_ticker_to_cik(self, ticker: str) -> dict:
         result = await self.call_tool("resolve_ticker_to_cik", {"ticker": ticker})
         return result if isinstance(result, dict) else {}

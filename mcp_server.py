@@ -101,6 +101,38 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["ticker"],
             },
         ),
+        types.Tool(
+            name="extract_filing_tables",
+            description=(
+                "Extract and return financial HTML tables from a specific SEC filing. "
+                "Filters out layout/navigation tables and returns only tables with numeric data "
+                "(income statements, balance sheets, segment tables, etc.). "
+                "Use this when you need structured financial data from a filing."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "accession_number": {"type": "string", "description": "SEC accession number"},
+                    "cik": {"type": "string", "description": "Company CIK (optional, improves reliability)"},
+                },
+                "required": ["accession_number"],
+            },
+        ),
+        types.Tool(
+            name="get_xbrl_facts",
+            description=(
+                "Fetch machine-readable XBRL financial facts for a company from SEC EDGAR. "
+                "Returns key metrics (revenue, net income, assets, cash flows, EPS, etc.) "
+                "across multiple fiscal years. Use this for quantitative financial analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cik": {"type": "string", "description": "Company CIK (10-digit or shorter)"},
+                },
+                "required": ["cik"],
+            },
+        ),
     ]
 
 
@@ -141,6 +173,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             )[:limit]
         elif name == "resolve_ticker_to_cik":
             result = edgar_client.resolve_ticker_to_cik(arguments["ticker"])
+        elif name == "extract_filing_tables":
+            result = edgar_client.fetch_filing_tables(
+                arguments["accession_number"],
+                cik=arguments.get("cik"),
+            )
+        elif name == "get_xbrl_facts":
+            result = edgar_client.fetch_xbrl_facts(arguments["cik"])
         else:
             result = {"error": f"Unknown tool: {name}"}
     except Exception as e:

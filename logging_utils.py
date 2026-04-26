@@ -57,6 +57,14 @@ def log_judge(proposal_id: str, query: str, judge: dict):
     })
 
 
+def log_ragas(proposal_id: str, query: str, ragas: dict):
+    _log("ragas", {
+        "proposal_id": proposal_id,
+        "query": query,
+        "ragas": ragas,
+    })
+
+
 def log_verification(proposal_id: str, claim_id: str, verdict: str):
     _log("verification", {
         "proposal_id": proposal_id,

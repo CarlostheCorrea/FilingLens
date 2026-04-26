@@ -7,6 +7,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 OPENAI_WORKER_MODEL = os.getenv("OPENAI_WORKER_MODEL", "gpt-4o-mini")
 OPENAI_JUDGE_MODEL = os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o-mini")
+OPENAI_RAGAS_MODEL = os.getenv("OPENAI_RAGAS_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 EDGAR_IDENTITY = os.getenv("EDGAR_IDENTITY", "FilingLens user filinglens@example.com")
 
@@ -33,6 +34,19 @@ SECTION_SCOUT_WINDOW_CHARS = int(os.getenv("SECTION_SCOUT_WINDOW_CHARS", 4_000))
 SECTION_SCOUT_OVERLAP_CHARS = int(os.getenv("SECTION_SCOUT_OVERLAP_CHARS", 1_000))
 SECTION_SCOUT_TOP_WINDOWS = int(os.getenv("SECTION_SCOUT_TOP_WINDOWS", 2))
 SECTION_SCOUT_SCORE_THRESHOLD = float(os.getenv("SECTION_SCOUT_SCORE_THRESHOLD", 0.25))
+
+INTERNAL_COT_JSON_INSTRUCTION = """
+
+Before writing the final answer, think through the task step by step internally:
+- identify the exact question or decision to make
+- review the supplied evidence carefully
+- check for contradictions, missing support, or weak citations
+- prefer narrower, evidence-backed claims over broad ones
+- verify that every required field is supported before finalizing
+
+Do not reveal your full chain-of-thought, scratch work, or hidden reasoning.
+Return only the final JSON requested by the prompt.
+"""
 
 SCOPE_PROPOSAL_SYSTEM_PROMPT = """You are a SEC filings research assistant. When the user asks a research question,
 propose a SCOPE for analysis — the set of companies and filings that should be
@@ -635,6 +649,38 @@ Return JSON:
   "concerns": ["...", "..."]
 }"""
 
+TABLE_CLASSIFIER_SYSTEM_PROMPT = """You are classifying financial tables extracted from an SEC filing.
+
+You will receive a JSON list of tables. Each table has: table_id, headers (column names), and sample_rows (first 3 rows of data).
+
+For each table, assign:
+1. A concise human-readable title (e.g. "Consolidated Statements of Operations", "Condensed Balance Sheets", "Segment Revenue Breakdown")
+2. A category from this fixed list:
+   - income_statement — Revenue, net income, EPS, EBITDA, operating income, R&D expense, SG&A
+   - balance_sheet — Assets, liabilities, equity, cash, goodwill, debt
+   - cash_flow — Operating, investing, financing cash flows, free cash flow, CapEx
+   - segment — Geographic or business segment breakdown, regional/product revenue
+   - equity_rollforward — Changes in stockholders' equity, share repurchase activity
+   - debt_schedule — Debt maturity schedule, credit facility details, interest rates
+   - quarterly_summary — Multi-quarter or selected annual financial data summary
+   - other — Subsidiary lists, share-based compensation, auditor fees, tax rates, or any non-financial table
+
+Rules:
+- If a table has no clear financial statement identity, default to "other"
+- Keep titles concise and professional — users will see these directly
+- Do not invent data beyond what the headers and rows show
+
+Return JSON with ONLY the list of classified tables:
+{
+  "tables": [
+    {
+      "table_id": "table_0",
+      "title": "Consolidated Statements of Operations",
+      "category": "income_statement"
+    }
+  ]
+}"""
+
 MARKET_SUMMARY_SYSTEM_PROMPT = """You are writing two concise summaries of a market gap analysis based on SEC filings.
 
 You will receive the sector query, gap clusters with structural constraint and urgency metadata,
@@ -653,3 +699,28 @@ Return JSON:
   "industry_summary": "...",
   "market_structure_summary": "..."
 }"""
+
+SCOPE_PROPOSAL_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+COMPANY_WORKER_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+MERGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+REVIEW_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+FINAL_SYNTHESIS_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+COMPARE_COMPANY_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+COMPARE_SYNTHESIS_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+CHANGE_DETECTION_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+CHANGE_SYNTHESIS_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+ANSWERING_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+MARKET_GAP_SCOPE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+PAIN_EXTRACTION_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+GAP_CLUSTER_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+STRUCTURAL_CONSTRAINT_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+BUYER_OWNERSHIP_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+URGENCY_PERSISTENCE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+COMMERCIALIZATION_DIFFICULTY_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+OPPORTUNITY_MEMO_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+COMPARE_JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+CHANGE_JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+MARKET_GAP_JUDGE_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+TABLE_CLASSIFIER_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION
+MARKET_SUMMARY_SYSTEM_PROMPT += INTERNAL_COT_JSON_INSTRUCTION

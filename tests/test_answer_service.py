@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 @pytest.mark.asyncio
 async def test_answer_backfills_judge_for_cached_answers(monkeypatch, tmp_path):
     from services import answer_service
-    from models import JudgeEvaluation
+    from models import JudgeEvaluation, RagasEvaluation
 
     cache_path = tmp_path / "scope_test_answer_cache.json"
     cached_payload = {
@@ -55,13 +55,26 @@ async def test_answer_backfills_judge_for_cached_answers(monkeypatch, tmp_path):
             concerns=[],
         )
 
+    async def fake_ragas(result):
+        return RagasEvaluation(
+            status="available",
+            summary="RAGAS thinks the answer is well-grounded.",
+            overall_score=0.91,
+            faithfulness=0.94,
+            answer_relevancy=0.88,
+            context_utilization=0.90,
+            concerns=[],
+        )
+
     monkeypatch.setattr(answer_service, "judge_answer", fake_judge)
+    monkeypatch.setattr(answer_service, "evaluate_answer_ragas", fake_ragas)
 
     result, from_cache = await answer_service.answer("scope_test", "How do these companies grow?")
 
     assert from_cache is True
     assert result.from_cache is True
     assert result.answer.judge_evaluation is not None
+    assert result.answer.ragas_evaluation is not None
 
 
 @pytest.mark.asyncio
@@ -120,8 +133,12 @@ async def test_answer_invalidates_stale_cache_version(monkeypatch, tmp_path):
     async def fake_judge(result):
         return None
 
+    async def fake_ragas(result):
+        return None
+
     monkeypatch.setattr(answer_service, "run_answer_workflow", fake_run_answer_workflow)
     monkeypatch.setattr(answer_service, "judge_answer", fake_judge)
+    monkeypatch.setattr(answer_service, "evaluate_answer_ragas", fake_ragas)
 
     result, from_cache = await answer_service.answer("scope_test", "How do these companies grow?")
 

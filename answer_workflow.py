@@ -34,6 +34,7 @@ from openai import AsyncOpenAI, RateLimitError
 
 import cost_tracker
 import rag_pipeline
+from services.xbrl_context_service import build_xbrl_context, is_quantitative
 from config import (
     OPENAI_API_KEY,
     OPENAI_MODEL,
@@ -403,6 +404,16 @@ async def finalize(state: WorkflowState) -> dict:
     if not final_claims:
         final_claims = merged_claims
 
+    # Inject XBRL key metrics for quantitative questions so the synthesis
+    # LLM can anchor claims to real filed numbers rather than prose alone.
+    query = state["query"]
+    xbrl_block = ""
+    if is_quantitative(query):
+        companies = state.get("companies", [])
+        xbrl_block = await build_xbrl_context(companies)
+
+    xbrl_section = f"\n\n{xbrl_block}" if xbrl_block else ""
+
     synthesis_raw = await _create_json_completion(
         model=OPENAI_MODEL,
         messages=[
@@ -410,10 +421,11 @@ async def finalize(state: WorkflowState) -> dict:
             {
                 "role": "user",
                 "content": (
-                    f"Research question: {state['query']}\n\n"
+                    f"Research question: {query}\n\n"
                     f"Merged claims:\n{json.dumps(final_claims, indent=2)}\n\n"
                     f"Company worker results:\n{json.dumps(worker_results, indent=2)}\n\n"
                     f"Merged gaps:\n{json.dumps(merged_gaps, indent=2)}"
+                    f"{xbrl_section}"
                 ),
             },
         ],

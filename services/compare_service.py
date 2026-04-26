@@ -7,6 +7,7 @@ import uuid  # still used for compare_run_id
 from bisect import bisect_left
 
 from answer_workflow import _create_json_completion
+from services.xbrl_context_service import build_xbrl_context
 from config import (
     COMPARE_COMPANY_SYSTEM_PROMPT,
     COMPARE_STATE_DIR,
@@ -300,7 +301,11 @@ async def _compare_company(query: str, company: Company, store: rag_pipeline.Eph
     )
 
 
-async def _synthesize_compare(query: str, comparisons: list[CompanyComparison]) -> tuple[str, list[str], list[str]]:
+async def _synthesize_compare(
+    query: str,
+    comparisons: list[CompanyComparison],
+    companies: list[Company],
+) -> tuple[str, list[str], list[str]]:
     payload = [
         {
             "ticker": comparison.ticker,
@@ -312,6 +317,13 @@ async def _synthesize_compare(query: str, comparisons: list[CompanyComparison]) 
         for comparison in comparisons
     ]
 
+    # Always attach XBRL metrics to comparisons — financial numbers almost
+    # always improve comparison quality regardless of query phrasing.
+    xbrl_block = await build_xbrl_context(
+        [{"ticker": c.ticker, "name": c.name, "cik": c.cik} for c in companies]
+    )
+    xbrl_section = f"\n\n{xbrl_block}" if xbrl_block else ""
+
     raw = await _create_json_completion(
         model=OPENAI_MODEL,
         messages=[
@@ -321,6 +333,7 @@ async def _synthesize_compare(query: str, comparisons: list[CompanyComparison]) 
                 "content": (
                     f"Comparison question: {query}\n\n"
                     f"Company summaries:\n{json.dumps(payload, indent=2)}"
+                    f"{xbrl_section}"
                 ),
             },
         ],
@@ -414,7 +427,7 @@ async def compare_companies(req: CompareRequest, force_refresh: bool = False) ->
     ]
     for comparison in comparisons:
         comparison.gaps.extend(issues_by_ticker.get(comparison.ticker, []))
-    overall_summary, similarities, differences = await _synthesize_compare(req.query, comparisons)
+    overall_summary, similarities, differences = await _synthesize_compare(req.query, comparisons, companies)
     stock_series = fetch_stock_series(companies, req.price_lookback)
     filing_events = _build_filing_events(companies, filings_by_ticker, comparisons, stock_series)
 

@@ -7,6 +7,7 @@ import uuid
 from bisect import bisect_left
 
 from answer_workflow import _create_json_completion
+from services.xbrl_context_service import build_xbrl_context
 from config import (
     CHANGE_DETECTION_SYSTEM_PROMPT,
     CHANGE_STATE_DIR,
@@ -384,13 +385,25 @@ async def _synthesize_overall_summary(
             for card in change_cards
         ],
     }
+
+    # Inject XBRL year-over-year metrics so the synthesis LLM can cross-reference
+    # language shifts with actual reported numbers (e.g. "revenue declined" vs filed figures).
+    xbrl_block = await build_xbrl_context(
+        [{"ticker": company.ticker, "name": company.name, "cik": company.cik}]
+    )
+    xbrl_section = f"\n\n{xbrl_block}" if xbrl_block else ""
+
     raw = await _create_json_completion(
         model=OPENAI_MODEL,
         messages=[
             {"role": "system", "content": CHANGE_SYNTHESIS_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Analysis question: {query}\n\nStructured change payload:\n{json.dumps(payload, indent=2)}",
+                "content": (
+                    f"Analysis question: {query}\n\n"
+                    f"Structured change payload:\n{json.dumps(payload, indent=2)}"
+                    f"{xbrl_section}"
+                ),
             },
         ],
     )

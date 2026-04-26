@@ -87,7 +87,7 @@ function tickerChipMarkup(ticker, name = '') {
 }
 
 function switchMode(mode) {
-  const modes = ['research', 'compare', 'change', 'gap'];
+  const modes = ['research', 'compare', 'change', 'gap', 'financials'];
   modes.forEach(m => {
     const el = $(`${m}-mode`);
     const btn = $(`mode-btn-${m}`);
@@ -97,11 +97,12 @@ function switchMode(mode) {
   const tagline = $('mode-tagline');
   if (tagline) {
     tagline.textContent = {
-      research: 'Cross-company SEC research with reviewable evidence and production-style summaries',
-      compare:  'Professional side-by-side company analysis with filing-backed strategy and market context',
-      change:   'Track how a company’s disclosure language evolves across time and what it may signal',
-      gap:      'Identify recurring industry pain points and where structurally constrained incumbents leave room for entrants',
-    }[mode] || '';
+      research:   "Cross-company SEC research with reviewable evidence and production-style summaries",
+      compare:    "Professional side-by-side company analysis with filing-backed strategy and market context",
+      change:     "Track how a company's disclosure language evolves across time and what it may signal",
+      gap:        "Identify recurring industry pain points and where structurally constrained incumbents leave room for entrants",
+      financials: "Extract structured financial tables and XBRL metrics directly from SEC EDGAR filings",
+    }[mode] || "";
   }
 }
 
@@ -137,6 +138,12 @@ function yearsAgo(n) {
   const d = new Date();
   d.setFullYear(d.getFullYear() - n);
   return d.toISOString().slice(0, 10);
+}
+
+function normalizeDateRange(range, fallbackStart = yearsAgo(3)) {
+  const normalized = Array.isArray(range) ? [...range] : [];
+  const start = normalized[0] || fallbackStart;
+  return [start, today()];
 }
 
 /* ── Tab switching ── */
@@ -488,11 +495,11 @@ function renderScopeProposal(data) {
   state.proposalId = data.proposal_id;
   state.companies  = data.companies.map(c => ({ ...c }));
   state.formTypes  = [...data.form_types];
-  state.dateRange  = [...data.date_range];
+  state.dateRange  = normalizeDateRange(data.date_range);
 
   $('scope-rationale').textContent = data.overall_rationale;
-  $('date-start').value = data.date_range[0] || '';
-  $('date-end').value   = data.date_range[1] || '';
+  $('date-start').value = state.dateRange[0] || '';
+  $('date-end').value   = state.dateRange[1] || '';
 
   renderFormTypeChips();
   renderCompanyGrid();
@@ -748,6 +755,7 @@ async function generateAnswer(forceRefresh = false) {
   show('answer-loading');
   hide('overall-answer-section');
   hide('judge-section');
+  hide('ragas-section');
   hide('company-deep-dives-section');
   hide('coverage-section');
   hide('claims-section');
@@ -781,6 +789,9 @@ async function generateAnswer(forceRefresh = false) {
       if (ans.judge_evaluation) {
         log(`Judge: ${ans.judge_evaluation.overall_verdict}, grounding ${ans.judge_evaluation.grounding}/5`, 'info');
       }
+      if (ans.ragas_evaluation?.overall_score !== null && ans.ragas_evaluation?.overall_score !== undefined) {
+        log(`RAGAS: overall ${ans.ragas_evaluation.overall_score.toFixed(2)}`, 'info');
+      }
       // Log each workflow stage to the activity log
       if (data.workflow?.stages) {
         data.workflow.stages.forEach(s => log(`[${s.name}] ${s.summary}`, 'info'));
@@ -803,6 +814,7 @@ function renderAnswer(data) {
   const deepDives = ans.company_deep_dives || [];
   const coverageNotes = ans.coverage_notes || [];
   const judge = ans.judge_evaluation || null;
+  const ragas = ans.ragas_evaluation || null;
   const claims = getAuditClaims(data);
 
   renderCostRow(ans.cost_summary || null, 'answer');
@@ -845,6 +857,8 @@ function renderAnswer(data) {
   } else {
     hide('judge-section');
   }
+
+  renderRagasPanel(ragas);
 
   if (deepDives.length) {
     show('company-deep-dives-section');
@@ -891,6 +905,46 @@ function renderCostRow(cost, prefix) {
     `${fmtN(cost.embedding_tokens)} embedding tokens`;
 
   show(rowId);
+}
+
+function renderRagasPanel(ragas) {
+  if (!$('ragas-section')) return;
+  if (!ragas) { hide('ragas-section'); return; }
+
+  const statusClass = `ragas-status-${ragas.status || 'available'}`;
+  $('ragas-status').className = `ragas-status ${statusClass}`;
+  $('ragas-status').textContent = `Status: ${(ragas.status || 'available').replace('_', ' ')}`;
+  $('ragas-summary').textContent = ragas.summary || '';
+
+  if (ragas.overall_score === null || ragas.overall_score === undefined) {
+    $('ragas-overall').textContent = '—';
+  } else {
+    $('ragas-overall').textContent = ragas.overall_score.toFixed(2);
+  }
+
+  const metrics = [
+    ['Faithfulness', ragas.faithfulness],
+    ['Answer relevancy', ragas.answer_relevancy],
+    ['Context utilization', ragas.context_utilization],
+  ];
+
+  $('ragas-score-grid').innerHTML = metrics.map(([label, score]) => `
+    <div class="judge-score-card">
+      <span class="judge-score-label">${label}</span>
+      <span class="judge-score-value">${score === null || score === undefined ? '—' : score.toFixed(2)}</span>
+    </div>
+  `).join('');
+
+  const concerns = ragas.concerns || [];
+  if (concerns.length) {
+    $('ragas-concerns').innerHTML = concerns.map(item => `<li>${item}</li>`).join('');
+    show('ragas-concerns-wrap');
+  } else {
+    $('ragas-concerns').innerHTML = '';
+    hide('ragas-concerns-wrap');
+  }
+
+  show('ragas-section');
 }
 
 /* ── Generic judge panel renderer for Compare / Change / Market Gap ── */
@@ -2012,11 +2066,11 @@ async function proposeGapScope() {
     gapState.proposalId = data.proposal_id;
     gapState.companies  = data.companies.map(c => ({ ...c }));
     gapState.formTypes  = [...data.form_types];
-    gapState.dateRange  = [...data.date_range];
+    gapState.dateRange  = normalizeDateRange(data.date_range);
 
     $('gap-scope-rationale').textContent = data.overall_rationale;
-    $('gap-date-start').value = data.date_range[0] || '';
-    $('gap-date-end').value   = data.date_range[1] || '';
+    $('gap-date-start').value = gapState.dateRange[0] || '';
+    $('gap-date-end').value   = gapState.dateRange[1] || '';
 
     renderGapFormTypeChips();
     renderGapCompanyGrid();
@@ -2268,6 +2322,309 @@ function buildOpportunityMemoCard(memo, clusters) {
       ${evidence}
     </article>
   `;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FINANCIAL DATA MODE — XBRL + Filing Table Extraction
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── State for financials mode ── */
+const financialsState = {
+  xbrl: null,         // raw XBRL response
+  tables: null,       // raw tables response
+  activeCategory: 'income_statement',
+  tableFilter: 'all',
+};
+
+/* ── XBRL Key Metrics ── */
+
+async function fetchXBRL() {
+  const ticker = ($('xbrl-ticker-input').value || '').trim().toUpperCase();
+  if (!ticker) { $('xbrl-status').textContent = 'Enter a ticker first.'; return; }
+
+  hide('xbrl-results');
+  $('xbrl-status').textContent = '';
+  show('xbrl-loading');
+  log(`Fetching XBRL facts for ${ticker}…`, 'info');
+
+  try {
+    // Pass ticker directly — server resolves to CIK
+    const xbrlRes = await fetch('/api/financials/xbrl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker }),
+    });
+    if (!xbrlRes.ok) throw new Error((await xbrlRes.json()).error || 'XBRL fetch failed');
+    const data = await xbrlRes.json();
+
+    hide('xbrl-loading');
+
+    if (data.error) { $('xbrl-status').textContent = `Error: ${data.error}`; return; }
+
+    financialsState.xbrl = data;
+    renderXBRL(data);
+    log(`XBRL: loaded ${Object.keys(data.facts || {}).length} metrics for ${data.company_name || ticker}`, 'success');
+
+  } catch (err) {
+    hide('xbrl-loading');
+    $('xbrl-status').textContent = `Error: ${err.message}`;
+    log(`XBRL error: ${err.message}`, 'error');
+  }
+}
+
+function renderXBRL(data) {
+  const facts = data.facts || {};
+  $('xbrl-company-name').textContent = data.company_name || 'Company';
+  $('xbrl-cik-badge').textContent = `CIK ${data.cik}`;
+  show('xbrl-results');
+
+  renderXBRLTable('income_statement', facts, 'xbrl-income-table');
+  renderXBRLTable('balance_sheet', facts, 'xbrl-balance-table');
+  renderXBRLTable('cash_flow', facts, 'xbrl-cash-table');
+
+  showXBRLCategory('income_statement');
+}
+
+function renderXBRLTable(category, facts, containerId) {
+  const container = $(containerId);
+  if (!container) return;
+
+  // Get metrics for this category
+  const metrics = Object.entries(facts)
+    .filter(([, v]) => v.category === category)
+    .map(([key, v]) => ({ key, ...v }));
+
+  if (!metrics.length) {
+    container.innerHTML = `<p class="empty-state">No ${category.replace('_', ' ')} data found in XBRL filing.</p>`;
+    return;
+  }
+
+  // Collect all unique period years (sorted descending)
+  const allPeriods = [...new Set(
+    metrics.flatMap(m => (m.facts || []).map(f => f.period_end))
+  )].sort((a, b) => b.localeCompare(a)).slice(0, 6);
+
+  const formatVal = (val, unit) => {
+    if (val === null || val === undefined) return '—';
+    if (unit === 'USD') {
+      const abs = Math.abs(val);
+      const sign = val < 0 ? '(' : '';
+      const close = val < 0 ? ')' : '';
+      if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B${close}`;
+      if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M${close}`;
+      if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(1)}K${close}`;
+      return `${sign}$${abs.toFixed(2)}${close}`;
+    }
+    if (unit === 'USD/shares') return `$${Number(val).toFixed(2)}`;
+    if (unit === 'shares') {
+      const abs = Math.abs(val);
+      if (abs >= 1e9) return `${(abs / 1e9).toFixed(2)}B shares`;
+      if (abs >= 1e6) return `${(abs / 1e6).toFixed(1)}M shares`;
+      return String(val);
+    }
+    return String(val);
+  };
+
+  const headerCells = allPeriods.map(p => {
+    const year = p.slice(0, 4);
+    return `<th class="xbrl-year-col">${year}</th>`;
+  }).join('');
+
+  const rows = metrics.map(m => {
+    const factsByPeriod = Object.fromEntries(
+      (m.facts || []).map(f => [f.period_end, f])
+    );
+    const cells = allPeriods.map(p => {
+      const fact = factsByPeriod[p];
+      const display = fact ? formatVal(fact.value, m.unit) : '—';
+      const cls = fact && fact.value < 0 ? ' class="xbrl-negative"' : '';
+      return `<td${cls}>${escapeHtml(display)}</td>`;
+    }).join('');
+    return `
+      <tr>
+        <td class="xbrl-metric-label">${escapeHtml(m.label)}</td>
+        ${cells}
+      </tr>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="xbrl-table-note">Annual figures (10-K / 20-F) · Source: SEC EDGAR XBRL</div>
+    <div class="xbrl-table-scroll">
+      <table class="xbrl-table">
+        <thead>
+          <tr>
+            <th class="xbrl-metric-col">Metric</th>
+            ${headerCells}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function showXBRLCategory(category) {
+  financialsState.activeCategory = category;
+
+  const catMap = {
+    income_statement: { tabId: 'fin-tab-income', tableId: 'xbrl-income-table' },
+    balance_sheet:    { tabId: 'fin-tab-balance', tableId: 'xbrl-balance-table' },
+    cash_flow:        { tabId: 'fin-tab-cash',    tableId: 'xbrl-cash-table' },
+  };
+
+  Object.entries(catMap).forEach(([cat, ids]) => {
+    const tab = $(ids.tabId);
+    const tbl = $(ids.tableId);
+    if (tab) tab.classList.toggle('active', cat === category);
+    if (tbl) tbl.classList.toggle('hidden', cat !== category);
+  });
+}
+
+/* ── Filing Table Extraction ── */
+
+async function fetchFilingTables() {
+  const accession = ($('tables-accession-input').value || '').trim();
+  const cik = ($('tables-cik-input').value || '').trim() || null;
+
+  if (!accession) { $('tables-status').textContent = 'Enter an accession number first.'; return; }
+
+  hide('tables-results');
+  $('tables-status').textContent = '';
+  show('tables-loading');
+  log(`Extracting tables from filing ${accession}…`, 'info');
+
+  try {
+    const res = await fetch('/api/financials/tables', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accession_number: accession, cik, classify_tables: true }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Table extraction failed');
+    const data = await res.json();
+
+    hide('tables-loading');
+
+    if (!data.tables || data.tables.length === 0) {
+      $('tables-status').textContent = `No financial tables found. ${(data.extraction_notes || []).join(' ')}`;
+      return;
+    }
+
+    financialsState.tables = data;
+    financialsState.tableFilter = 'all';
+    renderFilingTables(data);
+    log(`Tables: extracted ${data.tables.length} financial table(s) from ${data.company_name || accession}`, 'success');
+
+  } catch (err) {
+    hide('tables-loading');
+    $('tables-status').textContent = `Error: ${err.message}`;
+    log(`Table extraction error: ${err.message}`, 'error');
+  }
+}
+
+function renderFilingTables(data) {
+  const tables = data.tables || [];
+  const meta = [data.form_type, data.filing_date, data.ticker].filter(Boolean).join(' · ');
+
+  $('tables-company-name').textContent = data.company_name || data.accession_number;
+  $('tables-meta').textContent = meta;
+  $('tables-count-badge').textContent = `${tables.length} table${tables.length !== 1 ? 's' : ''}`;
+
+  show('tables-results');
+  renderTablesList(tables, 'all');
+}
+
+function filterTables(category) {
+  financialsState.tableFilter = category;
+
+  // Update tab active state
+  ['all', 'income_statement', 'balance_sheet', 'cash_flow', 'segment', 'other'].forEach(cat => {
+    const btn = $(`tables-tab-${cat === 'income_statement' ? 'income' : cat === 'balance_sheet' ? 'balance' : cat === 'cash_flow' ? 'cash' : cat}`);
+    if (btn) btn.classList.toggle('active', cat === category);
+  });
+
+  const tables = (financialsState.tables?.tables) || [];
+  renderTablesList(tables, category);
+}
+
+function renderTablesList(tables, filter) {
+  const container = $('tables-list');
+  if (!container) return;
+
+  const CATEGORY_LABELS = {
+    income_statement: 'Income Statement',
+    balance_sheet: 'Balance Sheet',
+    cash_flow: 'Cash Flows',
+    segment: 'Segment',
+    equity_rollforward: 'Equity',
+    debt_schedule: 'Debt Schedule',
+    quarterly_summary: 'Quarterly Summary',
+    other: 'Other',
+  };
+
+  const CATEGORY_BADGE_CLASS = {
+    income_statement: 'badge-blue',
+    balance_sheet: 'badge-yellow',
+    cash_flow: 'badge-green',
+    segment: 'badge-purple',
+    equity_rollforward: 'badge-blue',
+    debt_schedule: 'badge-yellow',
+    quarterly_summary: 'badge-green',
+    other: 'badge-neutral',
+  };
+
+  const filtered = filter === 'all'
+    ? tables
+    : tables.filter(t => {
+        if (filter === 'other') {
+          return !['income_statement', 'balance_sheet', 'cash_flow', 'segment'].includes(t.category);
+        }
+        return t.category === filter;
+      });
+
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty-state">No ${filter === 'all' ? '' : CATEGORY_LABELS[filter] + ' '}tables found.</div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map((table, idx) => {
+    const title = table.title || `Table ${table.table_id}`;
+    const categoryLabel = CATEGORY_LABELS[table.category] || table.category;
+    const badgeCls = CATEGORY_BADGE_CLASS[table.category] || 'badge-neutral';
+
+    const headerHtml = table.headers.length
+      ? `<tr>${table.headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
+      : '';
+
+    const bodyHtml = (table.rows || []).slice(0, 25).map(row =>
+      `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`
+    ).join('');
+
+    const moreRows = (table.row_count || table.rows?.length || 0) > 25
+      ? `<p class="filing-table-more">Showing 25 of ${table.row_count} rows</p>`
+      : '';
+
+    return `
+      <details class="filing-table-block" ${idx === 0 ? 'open' : ''}>
+        <summary class="filing-table-summary">
+          <div class="filing-table-summary-inner">
+            <span class="filing-table-title">${escapeHtml(title)}</span>
+            <span class="badge ${badgeCls}">${escapeHtml(categoryLabel)}</span>
+            <span class="filing-table-dims">${table.row_count || 0} rows × ${table.col_count || 0} cols</span>
+          </div>
+        </summary>
+        <div class="filing-table-content">
+          <div class="filing-table-scroll">
+            <table class="filing-table">
+              <thead>${headerHtml}</thead>
+              <tbody>${bodyHtml}</tbody>
+            </table>
+          </div>
+          ${moreRows}
+        </div>
+      </details>
+    `;
+  }).join('');
 }
 
 /* ── Keyboard shortcuts ── */

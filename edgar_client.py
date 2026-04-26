@@ -226,6 +226,215 @@ def fetch_filing_text(accession_number: str, cik: str | None = None) -> dict:
         return {"error": str(e), "accession_number": accession_number, "metadata": {}, "sections": {}}
 
 
+def fetch_filing_tables(accession_number: str, cik: str | None = None) -> dict:
+    """
+    Extract financial HTML tables from a specific SEC filing.
+    Filters out layout/navigation tables — keeps only tables with numeric data.
+    Results are cached to disk.
+    """
+    from bs4 import BeautifulSoup
+
+    cache_path = os.path.join(
+        FILINGS_CACHE_DIR,
+        f"{accession_number.replace('/', '_')}_tables.json"
+    )
+    if os.path.exists(cache_path):
+        with open(cache_path) as f:
+            return json.load(f)
+
+    try:
+        filing, company = _get_filing_by_accession(accession_number, cik=cik)
+        if filing is None:
+            return {"error": f"Filing not found: {accession_number}", "metadata": {}, "tables": []}
+
+        # Prefer raw HTML — tables are stripped in plain-text mode
+        html = ""
+        for attempt in ("html", "text"):
+            try:
+                fn = getattr(filing, attempt, None)
+                if fn and callable(fn):
+                    html = fn()
+                    if html:
+                        break
+            except Exception:
+                pass
+
+        if not html:
+            return {"error": "No HTML content found in filing", "metadata": {}, "tables": []}
+
+        soup = BeautifulSoup(html, "html.parser")
+        tables_out = []
+
+        for idx, table_tag in enumerate(soup.find_all("table")):
+            rows_tags = table_tag.find_all("tr")
+            if len(rows_tags) < 3:
+                continue
+
+            headers: list[str] = []
+            data_rows: list[list[str]] = []
+
+            for row_tag in rows_tags:
+                all_cells = row_tag.find_all(["th", "td"])
+                if not all_cells:
+                    continue
+                cell_texts = [c.get_text(" ", strip=True) for c in all_cells]
+                if not any(t.strip() for t in cell_texts):
+                    continue
+
+                has_th = bool(row_tag.find_all("th"))
+                if has_th or (not data_rows and not headers):
+                    headers = cell_texts
+                else:
+                    data_rows.append(cell_texts)
+
+            if not data_rows:
+                continue
+
+            # Filter: require at least 3 cells with numeric content in first 5 rows
+            import re as _re
+            _num = _re.compile(r"[\d,\.\(\)$%\-]+")
+            numeric_hits = sum(
+                1 for row in data_rows[:5]
+                for cell in row
+                if _num.search(cell.strip()) and len(cell.strip()) > 0
+            )
+            if numeric_hits < 3:
+                continue
+
+            tables_out.append({
+                "table_id": f"table_{idx}",
+                "headers": headers,
+                "rows": data_rows[:60],
+                "row_count": len(data_rows),
+                "col_count": max(
+                    len(headers),
+                    max((len(r) for r in data_rows[:5]), default=0),
+                ),
+            })
+
+        tickers = getattr(company, "tickers", []) or []
+        metadata = {
+            "ticker": tickers[0] if tickers else "",
+            "company_name": _safe_str(getattr(company, "name", "")),
+            "cik": _safe_str(getattr(company, "cik", "")),
+            "accession_number": accession_number,
+            "form_type": _safe_str(getattr(filing, "form", "")),
+            "filing_date": _safe_str(getattr(filing, "filing_date", "")),
+        }
+
+        result = {"metadata": metadata, "tables": tables_out}
+        with open(cache_path, "w") as fh:
+            json.dump(result, fh)
+        return result
+
+    except Exception as e:
+        return {"error": str(e), "metadata": {}, "tables": []}
+
+
+def fetch_xbrl_facts(cik: str) -> dict:
+    """
+    Fetch machine-readable XBRL financial facts from SEC EDGAR for a company.
+    Returns key metrics across fiscal years.
+    """
+    import httpx
+
+    _KEY_METRICS: dict[str, tuple[str, str]] = {
+        "Revenues":                                                ("Revenue (Total)", "income_statement"),
+        "RevenueFromContractWithCustomerExcludingAssessedTax":     ("Revenue from Contracts", "income_statement"),
+        "SalesRevenueNet":                                         ("Net Sales Revenue", "income_statement"),
+        "GrossProfit":                                             ("Gross Profit", "income_statement"),
+        "OperatingIncomeLoss":                                     ("Operating Income (Loss)", "income_statement"),
+        "NetIncomeLoss":                                           ("Net Income (Loss)", "income_statement"),
+        "EarningsPerShareBasic":                                   ("EPS Basic", "income_statement"),
+        "EarningsPerShareDiluted":                                 ("EPS Diluted", "income_statement"),
+        "ResearchAndDevelopmentExpense":                           ("R&D Expense", "income_statement"),
+        "SellingGeneralAndAdministrativeExpense":                  ("SG&A Expense", "income_statement"),
+        "Assets":                                                  ("Total Assets", "balance_sheet"),
+        "AssetsCurrent":                                           ("Current Assets", "balance_sheet"),
+        "CashAndCashEquivalentsAtCarryingValue":                   ("Cash & Equivalents", "balance_sheet"),
+        "Liabilities":                                             ("Total Liabilities", "balance_sheet"),
+        "LiabilitiesCurrent":                                      ("Current Liabilities", "balance_sheet"),
+        "LongTermDebt":                                            ("Long-Term Debt", "balance_sheet"),
+        "StockholdersEquity":                                      ("Stockholders' Equity", "balance_sheet"),
+        "NetCashProvidedByUsedInOperatingActivities":              ("Operating Cash Flow", "cash_flow"),
+        "NetCashProvidedByUsedInInvestingActivities":              ("Investing Cash Flow", "cash_flow"),
+        "NetCashProvidedByUsedInFinancingActivities":              ("Financing Cash Flow", "cash_flow"),
+        "PaymentsToAcquirePropertyPlantAndEquipment":              ("Capital Expenditures", "cash_flow"),
+    }
+
+    try:
+        cik_padded = str(int(cik)).zfill(10)
+        resp = httpx.get(
+            f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_padded}.json",
+            headers={"User-Agent": EDGAR_IDENTITY},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+
+        us_gaap = raw.get("facts", {}).get("us-gaap", {})
+        company_name = raw.get("entityName", "")
+
+        extracted: dict = {}
+
+        for gaap_key, (label, category) in _KEY_METRICS.items():
+            metric_data = us_gaap.get(gaap_key)
+            if not metric_data:
+                continue
+
+            units = metric_data.get("units", {})
+
+            for unit_type in ("USD", "USD/shares", "shares"):
+                entries = units.get(unit_type, [])
+                if not entries:
+                    continue
+
+                # Prefer FY annual filings; fall back to any 10-K/20-F entry
+                annual = [
+                    e for e in entries
+                    if e.get("form") in ("10-K", "20-F")
+                    and e.get("val") is not None
+                    and e.get("fp") == "FY"
+                ]
+                if not annual:
+                    annual = [
+                        e for e in entries
+                        if e.get("form") in ("10-K", "20-F") and e.get("val") is not None
+                    ]
+
+                annual.sort(key=lambda x: x.get("end", ""), reverse=True)
+
+                seen: set = set()
+                facts: list = []
+                for entry in annual[:8]:
+                    period = entry.get("end", "")
+                    if period in seen:
+                        continue
+                    seen.add(period)
+                    facts.append({
+                        "label": label,
+                        "value": entry.get("val"),
+                        "unit": unit_type,
+                        "period_end": period,
+                        "form": entry.get("form", ""),
+                        "filed": entry.get("filed", ""),
+                    })
+
+                if facts:
+                    extracted[gaap_key] = {
+                        "label": label,
+                        "category": category,
+                        "unit": unit_type,
+                        "facts": facts,
+                    }
+                    break  # Use first matching unit type
+
+        return {"cik": cik, "company_name": company_name, "facts": extracted}
+
+    except Exception as e:
+        return {"error": str(e), "cik": cik, "company_name": "", "facts": {}}
+
+
 def _get_filing_by_accession(accession_number: str, cik: str | None = None):
     """
     Resolve a filing object by accession number.

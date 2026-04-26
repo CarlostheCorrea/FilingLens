@@ -118,12 +118,24 @@ class JudgeEvaluation(BaseModel):
     concerns: list[str] = Field(default_factory=list)
 
 
+class RagasEvaluation(BaseModel):
+    status: str
+    summary: str
+    overall_score: Optional[float] = None
+    faithfulness: Optional[float] = None
+    answer_relevancy: Optional[float] = None
+    context_utilization: Optional[float] = None
+    concerns: list[str] = Field(default_factory=list)
+    metrics_run: list[str] = Field(default_factory=list)
+
+
 class StructuredAnswerPayload(BaseModel):
     overall_answer: OverallAnswer
     company_deep_dives: list[CompanyDeepDive] = Field(default_factory=list)
     claims_audit: ClaimsAuditPayload
     coverage_notes: list[str] = Field(default_factory=list)
     judge_evaluation: Optional[JudgeEvaluation] = None
+    ragas_evaluation: Optional[RagasEvaluation] = None
     cost_summary: Optional[CostSummary] = None
 
 
@@ -395,6 +407,62 @@ class OpportunityMemo(BaseModel):
     opportunity_status: str  # no_clear_opportunity | speculative | plausible | strong
     status_rationale: str
     opportunity_score: float = 0.0
+
+
+# ── Financial Table Extraction ────────────────────────────────────────────────
+
+class FinancialTable(BaseModel):
+    table_id: str
+    title: str = ""
+    category: str = "other"  # income_statement | balance_sheet | cash_flow | segment | equity_rollforward | debt_schedule | quarterly_summary | other
+    headers: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+    row_count: int = 0
+    col_count: int = 0
+
+
+class FilingFinancials(BaseModel):
+    accession_number: str
+    ticker: str = ""
+    company_name: str = ""
+    cik: str = ""
+    form_type: str = ""
+    filing_date: str = ""
+    tables: list[FinancialTable] = Field(default_factory=list)
+    extraction_notes: list[str] = Field(default_factory=list)
+
+
+class XBRLFact(BaseModel):
+    label: str
+    value: float
+    unit: str
+    period_end: str
+    form: str = ""
+    filed: str = ""
+
+
+class XBRLMetric(BaseModel):
+    label: str
+    category: str
+    unit: str
+    facts: list[XBRLFact] = Field(default_factory=list)
+
+
+class CompanyXBRL(BaseModel):
+    cik: str
+    company_name: str = ""
+    facts: dict[str, XBRLMetric] = Field(default_factory=dict)
+
+
+class FinancialsRequest(BaseModel):
+    accession_number: str
+    cik: Optional[str] = None
+    classify_tables: bool = True
+
+
+class XBRLRequest(BaseModel):
+    cik: Optional[str] = None
+    ticker: Optional[str] = None
 
 
 class MarketGapRequest(BaseModel):
