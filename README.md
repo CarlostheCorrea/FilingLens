@@ -2,6 +2,8 @@
 
 FilingLens is a browser-based SEC EDGAR research workspace for public-company analysis. It combines **RAG**, a **custom MCP server**, **human-in-the-loop review**, **multi-agent answer generation**, **XBRL financial data**, **LLM-as-a-judge**, and **RAGAS** to turn SEC filings into production-style research outputs.
 
+I also created this project using a local [Ollama LLM](https://github.com/CarlostheCorrea/FilingLens-_Open)
+
 The app is built as a single FastAPI + HTML/CSS/JS workspace with five user-facing modes:
 
 - `Market Analyst`
