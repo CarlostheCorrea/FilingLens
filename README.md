@@ -330,15 +330,29 @@ Open [http://localhost:8000](http://localhost:8000).
 4. Choose forms, time frame, filing count, and stock context
 5. Review overall change summary, change cards, and judge panel
 
+<img width="733" height="614" alt="Screenshot 2026-04-27 at 9 03 36 AM" src="https://github.com/user-attachments/assets/302faa72-4ae1-4d97-8eef-357a77710e80" />
+
+<img width="714" height="641" alt="Screenshot 2026-04-27 at 9 03 55 AM" src="https://github.com/user-attachments/assets/c0511017-fb82-40aa-bf62-68c351553072" />
 
 
 ### Market Gap Discovery
 
 1. Describe an industry or market problem
-2. Review the proposed company set
-3. Run market analysis
-4. Review industry summary, ranked opportunity memos, underlying gap clusters, and judge panel
-5. Ask memo-specific follow-up questions in the grounded follow-up chat
+
+<img width="711" height="637" alt="Screenshot 2026-04-27 at 9 05 38 AM" src="https://github.com/user-attachments/assets/e557a05d-593f-4bbb-bb77-e6876220d576" />
+
+3. Review the proposed company set
+4. Run market analysis
+5. Review industry summary, ranked opportunity memos, underlying gap clusters, and judge panel
+
+<img width="749" height="564" alt="Screenshot 2026-04-27 at 9 09 08 AM" src="https://github.com/user-attachments/assets/bbe177f9-528a-4c44-90bf-cdc15458b392" />
+
+<img width="711" height="601" alt="Screenshot 2026-04-27 at 9 09 30 AM" src="https://github.com/user-attachments/assets/fb122dd8-a85d-4567-a54a-0f863f4c2cd9" />
+
+7. Ask memo-specific follow-up questions in the grounded follow-up chat
+
+<img width="720" height="347" alt="Screenshot 2026-04-27 at 9 10 28 AM" src="https://github.com/user-attachments/assets/e51bd952-c31b-4f2e-9ea4-640cc50ac86c" />
+
 
 ### Financial Data
 
