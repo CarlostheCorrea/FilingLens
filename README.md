@@ -1,197 +1,408 @@
-# FilingLens — SEC Filing Intelligence Tool
+# FilingLens — SEC Filing Intelligence Workspace
 
-A browser-based research copilot that uses **RAG + MCP + LLM-as-a-Judge** to analyze SEC filings across public companies. Every feature produces filing-grounded outputs with automated quality scoring.
+FilingLens is a browser-based SEC EDGAR research workspace for public-company analysis. It combines **RAG**, a **custom MCP server**, **human-in-the-loop review**, **multi-agent answer generation**, **XBRL financial data**, **LLM-as-a-judge**, and **RAGAS** to turn SEC filings into production-style research outputs.
 
-------------------------------------------------------------------------
+The app is built as a single FastAPI + HTML/CSS/JS workspace with five user-facing modes:
 
-## Features
+- `Market Analyst`
+- `Compare Companies`
+- `Filing Change Intelligence`
+- `Market Gap Discovery`
+- `Financial Data`
 
-### 📊 Market Analyst
+---
 
-Ask cross-company research questions answered directly from SEC filings. An AI supervisor proposes which companies and filings to include, you review and approve the scope (HITL), and GPT-4o generates claim-by-claim answers with full chunk citations. Every answer is automatically scored by an LLM judge.
+## What It Does
 
-### ⚖️ Compare Two Companies
+### `Market Analyst`
 
-Side-by-side filing-backed comparison of any two public companies on a question of your choice. Fetches relevant filings, runs per-company analysis, synthesizes similarities and differences, and overlays indexed stock price performance around filing dates. LLM judge scores the comparison output.
+Ask cross-company research questions directly against SEC filings.
 
-### 🔄 Filing Change Intelligence
+- AI proposes companies, forms, and date range using MCP tools
+- user reviews and approves the scope before ingestion
+- filings are fetched, section-filtered, chunked, embedded, and stored in Chroma
+- answers are generated through a **LangGraph supervisor workflow**
+- output includes:
+  - overall answer
+  - company deep dives
+  - claims audit
+  - claim-level HITL verification
+  - LLM judge
+  - RAGAS panel
 
-Track how a single company's filing language shifted across time. Compares consecutive filings (10-K, 10-Q, or 8-K), detects material wording changes, classifies each by a fixed taxonomy (new risk introduced, strategy shift, capital allocation change, etc.), and overlays stock market context. LLM judge scores the detected changes.
+### `Compare Companies`
 
-### 🔎 Market Gap Discovery
+Compare two companies side by side using recent filings.
 
-Discover structural market opportunities from SEC filings across an entire industry. The pipeline extracts specific pain points from each company, clusters shared problems across incumbents, analyzes why incumbents appear structurally unable to fix them (regulatory lock-in, legacy systems, business model conflicts), and synthesizes ranked founder-oriented opportunity memos. LLM judge scores the analysis for grounding and honesty.
+- filing-backed per-company summaries
+- synthesized similarities and differences
+- indexed stock chart using `yfinance`
+- filing-event return windows
+- optional XBRL context for quantitative grounding
+- LLM judge
 
-### 📚 Analyst Library
+### `Filing Change Intelligence`
 
-Save any completed Market Analyst session to a named library entry and reload it later without re-ingesting. Preserves the full RAG scope so you can return to the same analyst context instantly.
+Track how one company’s disclosure language changes across time.
 
-------------------------------------------------------------------------
+- compares filings across a selected date range
+- classifies material shifts into a fixed taxonomy
+- renders structured change cards with before/after evidence
+- can add annual XBRL context to the final summary layer
+- includes stock context and LLM judge
+
+### `Market Gap Discovery`
+
+Analyze an industry as a market structure problem rather than a company problem.
+
+- extracts pain points from multiple companies’ filings
+- clusters shared problems across incumbents
+- analyzes hard vs soft structural constraints
+- produces ranked **founder-focused opportunity memos**
+- each memo now supports **memo-scoped follow-up chat** grounded only in that memo’s filing evidence
+- LLM judge scores the output
+
+### `Financial Data`
+
+Pull structured financial data directly from EDGAR.
+
+- machine-readable XBRL metrics
+- annual financial facts such as revenue, income, EPS, assets, cash flows
+- organized by category: income statement, balance sheet, cash flows, and per-share metrics
+
+---
+
+## Core Capabilities
+
+- SEC filing discovery and fetch through a custom MCP server
+- persistent local vector retrieval with ChromaDB
+- long-section window scouting for deep filing retrieval
+- foreign issuer support (`20-F`, `6-K`)
+- XBRL financial fact extraction
+- claim-level verification workflow
+- automated LLM judging
+- reference-free RAGAS scoring for Research Answer
+
+---
 
 ## Architecture
 
-```         
-Browser (HTML / CSS / JS)
+```text
+Browser UI (HTML / CSS / JS)
     ↓
-FastAPI Backend
-    ├── Scope Proposal          GPT-4o + MCP tools (EDGAR discovery)
-    ├── Live Ingestion          EDGAR → chunk → embed → ChromaDB
-    ├── Market Analyst          Supervisor workflow → claims → LLM judge
-    ├── Compare                 Per-company analysis → synthesis → LLM judge
-    ├── Change Intelligence     Window diff → change cards → LLM judge
-    ├── Market Gap Discovery    Pain extraction → clustering → opportunity memos → LLM judge
-    └── Analyst Library         Named save/load of RAG sessions
+FastAPI app
+    ├── Scope proposal / approval
+    ├── Ingestion + vector refresh
+    ├── Market Analyst
+    │     └── LangGraph supervisor workflow
+    ├── Compare Companies
+    ├── Filing Change Intelligence
+    ├── Market Gap Discovery
+    ├── Financial Data (XBRL + tables)
+    └── Library / logs / data controls
     ↓
-Custom MCP Server (EDGAR tools via edgartools)
+MCP client (stdio subprocess)
     ↓
-SEC EDGAR (live, free, no account required)
+Custom MCP server
+    ├── company discovery tools
+    ├── filing listing tools
+    ├── filing fetch tools
+    ├── filing table extraction
+    └── XBRL facts
     ↓
-ChromaDB (persistent vector store — local disk)
-OpenAI API (embeddings + generation + judge)
+SEC EDGAR / edgartools
+
+OpenAI API
+    ├── generation
+    ├── worker-model subtasks
+    ├── judge scoring
+    ├── RAGAS evaluation
+    └── embeddings
+
+ChromaDB
+    ├── persistent sec_filings collection
+    └── ephemeral per-run stores where needed
 ```
 
-------------------------------------------------------------------------
+---
+
+## Multi-Agent / HITL / MCP
+
+### Multi-agent
+
+FilingLens uses a real **supervisor-style multi-agent workflow** in `Market Analyst`.
+
+Flow:
+
+1. `load_context`
+2. `supervisor`
+3. parallel `company_worker` nodes, one per company
+4. `merge_answers`
+5. `review_answer`
+6. `finalize`
+
+This lives in [answer_workflow.py](/Users/carloscorrea/Documents/GitHub/FilingLens/answer_workflow.py).
+
+### Human in the loop
+
+Two explicit HITL checkpoints are built in:
+
+1. scope review/approval before ingestion
+2. claim verification after answer generation
+
+### MCP
+
+The repo uses the Python `mcp` package and a custom local MCP server.
+
+Current MCP tools:
+
+- `list_companies_by_sector`
+- `search_company`
+- `list_filings`
+- `fetch_filing`
+- `fetch_filing_section`
+- `list_recent_filings_for_company`
+- `resolve_ticker_to_cik`
+- `extract_filing_tables`
+- `get_xbrl_facts`
+
+These tools are used mainly for:
+
+- company discovery
+- filing discovery
+- filing fetch
+- XBRL fetch
+
+Later synthesis, judging, and retrieval logic run inside the app after the source data has been fetched.
+
+---
+
+## Evaluation
+
+### LLM-as-a-Judge
+
+All major analysis modes use an automated judge pass:
+
+- `Market Analyst`
+- `Compare Companies`
+- `Filing Change Intelligence`
+- `Market Gap Discovery`
+
+Judge dimensions typically include:
+
+- helpfulness
+- clarity
+- grounding
+- citation quality
+- overclaiming risk
+
+### RAGAS
+
+`Market Analyst` also includes a RAGAS panel.
+
+Current RAGAS usage is **reference-free**, so it does not require ground-truth answers. The repo evaluates:
+
+- faithfulness
+- answer relevancy
+- context utilization
+
+If one metric fails because of prompt/output budget limits, the UI shows a partial status rather than implying full grounding.
+
+---
 
 ## Data Flow
 
-1.  **Scope** — AI proposes companies + form types via EDGAR tool calls; you review, edit, and approve.
-2.  **Ingest** — Filings fetched live from EDGAR, section-focused, chunked (\~800 tokens), embedded (`text-embedding-3-small`), stored in ChromaDB. Up to 3 most recent filings per company. Cache-aware: re-embeds only on content change.
-3.  **RAG** — Queries embedded at runtime, top-k chunks retrieved, fed to GPT-4o for generation.
-4.  **Judge** — Every final output (answer, comparison, change summary, gap analysis) is independently scored by a second LLM pass on helpfulness, clarity, grounding, citation quality, and overclaiming risk.
+### Market Analyst
 
-------------------------------------------------------------------------
+1. User enters a research question
+2. AI proposes a scope through MCP-backed discovery
+3. User approves the scope
+4. Ingestion fetches filings and refreshes vectors if needed
+5. LangGraph workflow generates the answer
+6. Judge and RAGAS score the result
+7. User can verify claims and save the session to the library
+
+### Compare / Change / Market Gap
+
+These are button-triggered service workflows:
+
+- the user provides the input form
+- backend code decides which MCP tools to call
+- filing data is fetched automatically
+- results are synthesized and judged
+
+So the repo uses both:
+
+- **LLM-directed tool calling** for scope proposal
+- **code-directed tool calling** for execution workflows
+
+---
 
 ## Quick Start
 
 ### 1. Install dependencies
 
-``` bash
+```bash
 pip install -r requirements.txt
 ```
 
 ### 2. Configure environment
 
-``` bash
+```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Set at minimum:
 
-```         
+```text
 OPENAI_API_KEY=...
 EDGAR_IDENTITY=Your Name your.email@example.com
 ```
 
-### 3. Run the server
+Optional model settings:
 
-``` bash
+```text
+OPENAI_MODEL=gpt-4o
+OPENAI_WORKER_MODEL=gpt-4o-mini
+OPENAI_JUDGE_MODEL=gpt-4o-mini
+OPENAI_RAGAS_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+### 3. Run the app
+
+```bash
 uvicorn main:app --reload --port 8000
 ```
 
-Open <http://localhost:8000> in your browser.
+Open [http://localhost:8000](http://localhost:8000).
 
-------------------------------------------------------------------------
+---
 
-## User Flows
+## Feature Workflows
 
 ### Market Analyst
 
-1.  Enter a research question
-2.  Review and edit the AI's proposed scope (companies, form types, date range)
-3.  Run Live Ingestion — filings fetched from EDGAR and vectorized
-4.  Ask questions — answers generated with claim citations
-5.  Verify claims — confirm, flag, or mark as hallucinated
-6.  Optionally save the session to the Analyst Library
+1. Enter a research question
+2. Review/edit the proposed scope
+3. Approve and ingest filings
+4. Ask a research question against the ingested scope
+5. Review overall answer, deep dives, claims audit, judge, and RAGAS
+6. Verify claims if needed
 
-### Compare Two Companies
+### Compare Companies
 
-1.  Enter two tickers and a comparison question
-2.  Select form types and date range
-3.  Results include: overall summary, per-company analysis, similarities/differences, stock chart, filing event table, LLM judge score
+1. Enter two tickers
+2. Enter a comparison question
+3. Choose filing types, date range, and stock lookback
+4. Review the filing-backed comparison, judge panel, stock chart, and event table
 
 ### Filing Change Intelligence
 
-1.  Enter a ticker and an analysis lens (e.g. "what changed in pricing and margin language?")
-2.  Select form types, time window, and number of filings
-3.  Results include: change cards classified by category, timeline selector, stock context, LLM judge score
+1. Enter one ticker
+2. Enter a change lens question
+3. Choose forms, time frame, filing count, and stock context
+4. Review overall change summary, change cards, and judge panel
 
 ### Market Gap Discovery
 
-1.  Describe an industry or sector
-2.  AI discovers a representative set of companies (8–12) — review and edit
-3.  Pipeline runs: pain extraction → clustering → structural constraint analysis → opportunity memos
-4.  Results include: ranked opportunity memos, gap clusters with evidence, coverage notes, LLM judge score
+1. Describe an industry or market problem
+2. Review the proposed company set
+3. Run market analysis
+4. Review industry summary, ranked opportunity memos, underlying gap clusters, and judge panel
+5. Ask memo-specific follow-up questions in the grounded follow-up chat
 
-------------------------------------------------------------------------
+### Financial Data
 
-## Example Questions
+1. Enter a ticker
+2. Pull XBRL metrics directly from SEC EDGAR
+3. Review annual income, balance sheet, and cash flow metrics across fiscal years
 
-**Market Analyst** - "How do NVIDIA, AMD, and Intel describe their dependence on TSMC?" - "Which semiconductor companies flagged U.S.-China export controls as a material risk?"
+---
 
-**Compare** - "How do Coca-Cola and PepsiCo compare on pricing power and volume strategy?" - "How do JPMorgan and Bank of America describe credit loss exposure?"
+## Important Implementation Notes
 
-**Change Intelligence** - "What changed in Apple's supply chain risk language between 2022 and 2024?" - "How did Meta's description of regulatory risk shift after the EU Digital Markets Act?"
+### Date ranges
 
-**Market Gap Discovery** - "US beverage distribution" - "Regional banking technology infrastructure" - "Industrial automation and robotics"
+Date-driven UI sections now normalize the end date to the current date in the proposal flows so stale fixed end dates do not linger in the forms.
 
-------------------------------------------------------------------------
+### Long-section retrieval
 
-## LLM-as-a-Judge
+The repo no longer relies on only the opening preview of a long filing section. It uses overlapping scouting windows to find relevant deep content inside large sections before chunking and retrieval.
 
-Every feature runs an automated quality review after generation. The judge is a separate LLM call that scores the output independently — it does not share context with the generation step.
+### XBRL
 
-| Feature | What the judge evaluates |
-|------------------------------------|------------------------------------|
-| Market Analyst | Helpfulness, clarity, grounding, citation quality, overclaiming risk |
-| Compare | Whether similarities/differences are specific and filing-backed; flags causal stock claims |
-| Change Intelligence | Whether change cards have real before/after evidence; flags inferred management intent |
-| Market Gap | Whether clusters are specific (not platitudes); flags `strong` status without proportionate constraint evidence |
+XBRL is now available as an MCP tool and the shared XBRL context service routes through the MCP client rather than calling the EDGAR helper directly.
 
-Scores: 1–5 per dimension. Verdict: `strong` / `mixed` / `weak`. Overclaiming risk: `low` / `medium` / `high`.
+### Market Gap memo chat
 
-------------------------------------------------------------------------
+The follow-up chat under each opportunity memo is:
 
-## Project Structure
+- scoped to a single memo
+- grounded only in that memo’s evidence set / cluster evidence
+- citation-aware across turns
+- designed to prefer new evidence and suppress repeated citations when no new support exists
+
+---
+
+## Repository Structure
 
 | Path | Purpose |
-|------------------------------------|------------------------------------|
-| `main.py` | FastAPI entry point, router registration |
-| `config.py` | Settings, all system prompts, constants |
-| `models.py` | Pydantic schemas for all features |
-| `agent.py` | GPT-4o scope proposal (standard + market gap) |
-| `edgar_client.py` | EdgarTools wrapper, ticker-to-CIK resolution |
-| `mcp_server.py` | Standalone MCP server (EDGAR tools) |
-| `mcp_client.py` | Backend MCP client (stdio subprocess) |
-| `rag_pipeline.py` | Chunk, embed, retrieve, EphemeralStore, section scout |
+|---|---|
+| `main.py` | FastAPI entry point |
+| `config.py` | env settings, prompt templates, constants |
+| `models.py` | shared Pydantic models |
+| `agent.py` | scope proposal logic |
 | `answer_workflow.py` | LangGraph supervisor workflow for Market Analyst |
-| `hitl.py` | HITL state persistence (scope, answers, manifests) |
-| `logging_utils.py` | Structured JSONL logging |
-| `routes/` | FastAPI route handlers (scope, ingest, answer, compare, change, gap, library, data, verify) |
-| `services/` | Business logic (ingestion, answer, compare, change intelligence, market gap, judge, library) |
-| `static/app.js` | All frontend logic |
-| `static/style.css` | All styles |
-| `templates/index.html` | Single-page app shell |
+| `mcp_server.py` | custom MCP server |
+| `mcp_client.py` | backend MCP client |
+| `edgar_client.py` | SEC/edgartools helper layer |
+| `rag_pipeline.py` | chunking, embeddings, retrieval, vector refresh |
+| `services/` | feature services |
+| `routes/` | API routes |
+| `templates/index.html` | main app shell |
+| `static/app.js` | frontend behavior |
+| `static/style.css` | styles |
+| `data/` | local app state, logs, caches, vectors |
+| `tests/` | test suite |
 
-------------------------------------------------------------------------
+---
 
 ## Tech Stack
 
-| Component          | Technology                                 |
-|--------------------|--------------------------------------------|
-| LLM (generation)   | GPT-4o                                     |
-| LLM (worker tasks) | GPT-4o-mini                                |
-| LLM (judge)        | GPT-4o-mini                                |
-| Embeddings         | text-embedding-3-small                     |
-| Vector store       | ChromaDB (persistent local)                |
-| SEC data           | edgartools + SEC EDGAR (free, live)        |
-| MCP                | Custom stdio MCP server                    |
-| Backend            | FastAPI + uvicorn                          |
-| Frontend           | Plain HTML, CSS, JavaScript (no framework) |
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI + uvicorn |
+| Frontend | Plain HTML / CSS / JavaScript |
+| LLM (primary) | GPT-4o |
+| Worker / judge / RAGAS model defaults | GPT-4o-mini |
+| Embeddings | `text-embedding-3-small` |
+| RAG evaluation | `ragas` |
+| Vector store | ChromaDB |
+| SEC access | SEC EDGAR + `edgartools` |
+| MCP | Python `mcp` package + custom stdio server |
+| Stock context | `yfinance` |
 
-------------------------------------------------------------------------
+---
 
 ## Running Tests
 
-``` bash
+Run the full suite:
+
+```bash
 pytest tests/ -v
 ```
+
+Run a focused area:
+
+```bash
+pytest -q tests/test_market_gap_service.py
+pytest -q tests/test_ragas_service.py
+pytest -q tests/test_change_intelligence_service.py
+```
+
+---
+
+## Current Positioning
+
+FilingLens is not just a filing viewer and not just an AI wrapper. It is a **market intelligence workspace** built around live SEC evidence, structured review, and decision-support outputs.
