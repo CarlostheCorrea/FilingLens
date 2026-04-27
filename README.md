@@ -284,11 +284,21 @@ Open [http://localhost:8000](http://localhost:8000).
 ### Market Analyst
 
 1. Enter a research question
-2. Review/edit the proposed scope
-3. Approve and ingest filings
-4. Ask a research question against the ingested scope
-5. Review overall answer, deep dives, claims audit, judge, and RAGAS
-6. Verify claims if needed
+
+<img width="1512" height="825" alt="Screenshot 2026-04-27 at 8 44 28 AM" src="https://github.com/user-attachments/assets/03ef41e0-7721-43ff-86b3-37ac71a41ef6" />
+
+3. Review/edit the proposed scope
+4. Approve and ingest filings
+
+<img width="1512" height="823" alt="Screenshot 2026-04-27 at 8 45 29 AM" src="https://github.com/user-attachments/assets/753314b1-c53e-4a02-8b2e-a81aee1ff6b7" />
+
+5. Ask a research question against the ingested scope
+
+
+6. Review overall answer, deep dives, claims audit, judge, and RAGAS
+7. Verify claims if needed
+
+
 
 ### Compare Companies
 
