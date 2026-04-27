@@ -143,8 +143,6 @@ Flow:
 5. `review_answer`
 6. `finalize`
 
-This lives in [answer_workflow.py](/Users/carloscorrea/Documents/GitHub/FilingLens/answer_workflow.py).
-
 ### Human in the loop
 
 Two explicit HITL checkpoints are built in:
