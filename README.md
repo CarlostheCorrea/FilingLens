@@ -294,10 +294,14 @@ Open [http://localhost:8000](http://localhost:8000).
 
 5. Ask a research question against the ingested scope
 
+<img width="1042" height="641" alt="Screenshot 2026-04-27 at 8 52 32 AM" src="https://github.com/user-attachments/assets/14a4731f-8b1d-40d1-9961-3e325be6d1ed" />
 
 6. Review overall answer, deep dives, claims audit, judge, and RAGAS
 7. Verify claims if needed
 
+<img width="777" height="621" alt="Screenshot 2026-04-27 at 8 56 35 AM" src="https://github.com/user-attachments/assets/0d0db84a-c180-4ffd-bc04-9cffd1ef0065" />
+
+<img width="749" height="551" alt="Screenshot 2026-04-27 at 8 57 07 AM" src="https://github.com/user-attachments/assets/bdc0b524-c612-4b67-a645-3e1ca1e084fc" />
 
 
 ### Compare Companies
@@ -305,14 +309,28 @@ Open [http://localhost:8000](http://localhost:8000).
 1. Enter two tickers
 2. Enter a comparison question
 3. Choose filing types, date range, and stock lookback
-4. Review the filing-backed comparison, judge panel, stock chart, and event table
+
+<img width="786" height="615" alt="Screenshot 2026-04-27 at 8 59 03 AM" src="https://github.com/user-attachments/assets/61eb0c3c-8050-444d-a9ca-5d782a526202" />
+
+<img width="718" height="554" alt="Screenshot 2026-04-27 at 8 59 33 AM" src="https://github.com/user-attachments/assets/9fc427c9-31d8-4687-bf86-019a45edd16c" />
+
+5. Review the filing-backed comparison, judge panel, stock chart, and event table
+
+<img width="718" height="435" alt="Screenshot 2026-04-27 at 8 59 59 AM" src="https://github.com/user-attachments/assets/f827aba7-6eb9-4db6-bf57-1a4f2c9d8f4b" />
+
 
 ### Filing Change Intelligence
 
 1. Enter one ticker
 2. Enter a change lens question
-3. Choose forms, time frame, filing count, and stock context
-4. Review overall change summary, change cards, and judge panel
+
+<img width="750" height="353" alt="Screenshot 2026-04-27 at 9 01 59 AM" src="https://github.com/user-attachments/assets/492d7b8f-7683-4538-acff-42effa2e5d28" />
+
+
+4. Choose forms, time frame, filing count, and stock context
+5. Review overall change summary, change cards, and judge panel
+
+
 
 ### Market Gap Discovery
 
