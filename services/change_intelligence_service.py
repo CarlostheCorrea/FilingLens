@@ -452,12 +452,28 @@ async def change_intelligence(req: ChangeIntelligenceRequest, force_refresh: boo
         filing_text = await mcp.fetch_filing(accession, cik=company.cik)
         if filing_text.get("error"):
             continue
-        metadata = filing_text.get("metadata", {})
+
+        # Normalize metadata to the listing values so chunk metadata and chunk_ids
+        # always reflect the correct filing date, not whatever edgartools resolves internally.
+        # Without this, edgartools can return mismatched filing_date metadata for a given
+        # accession number, causing evidence items to display the wrong date in the UI.
+        canonical_form_type = filing_meta.get("form_type", "") or filing_text.get("metadata", {}).get("form_type", "")
+        canonical_filing_date = filing_meta.get("filing_date", "") or filing_text.get("metadata", {}).get("filing_date", "")
+        filing_text = {
+            **filing_text,
+            "metadata": {
+                **filing_text.get("metadata", {}),
+                "accession_number": accession,
+                "form_type": canonical_form_type,
+                "filing_date": canonical_filing_date,
+            },
+        }
+
         filing_records.append(
             Filing(
                 accession_number=accession,
-                form_type=filing_meta.get("form_type", metadata.get("form_type", "")),
-                filing_date=filing_meta.get("filing_date", metadata.get("filing_date", "")),
+                form_type=canonical_form_type,
+                filing_date=canonical_filing_date,
                 company_name=company.name,
                 cik=company.cik,
                 ticker=company.ticker,
