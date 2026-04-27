@@ -240,6 +240,13 @@ So the repo uses both:
 
 ## Quick Start
 
+### Clone Repo
+```bash
+git clone https://github.com/CarlostheCorrea/FilingLens
+cd FilingLens
+
+```
+
 ### 1. Install dependencies
 
 ```bash
