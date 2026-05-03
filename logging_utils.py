@@ -65,6 +65,23 @@ def log_ragas(proposal_id: str, query: str, ragas: dict):
     })
 
 
+def log_local_classifier(task: str, status: str, model: str, note: str = ""):
+    _log("local_classifier", {
+        "task": task,
+        "status": status,
+        "model": model,
+        "note": note,
+    })
+
+
+def log_secondary_judge(scope: str, query: str, judge: dict):
+    _log("secondary_judge", {
+        "scope": scope,
+        "query": query,
+        "judge": judge,
+    })
+
+
 def log_verification(proposal_id: str, claim_id: str, verdict: str):
     _log("verification", {
         "proposal_id": proposal_id,

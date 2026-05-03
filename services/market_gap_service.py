@@ -28,6 +28,8 @@ from config import (
 from mcp_client import get_mcp_client
 import cost_tracker
 from services.judge_service import judge_market_gap
+from services import local_classifier_service
+from services.local_classifier_service import LocalClassifierError
 from models import (
     Chunk,
     Company,
@@ -64,7 +66,7 @@ _BUYER_OWNERS = {
     "management",
     "unknown",
 }
-_PERSISTENCE_VALUES = {"worsening", "recurring", "recent", "episodic", "unclear"}
+_PERSISTENCE_VALUES = {"worsening", "recurring", "recent", "episodic", "shrinking", "unclear"}
 _OPPORTUNITY_TYPES = {
     "workflow_software",
     "compliance_automation",
@@ -273,27 +275,57 @@ async def _extract_pain_points(company: Company, chunks: list[Chunk]) -> list[Pa
     )
     valid_chunk_ids = {chunk.chunk_id for chunk in chunks}
     chunk_meta_map = {chunk.chunk_id: chunk.metadata for chunk in chunks}
+    raw_points = raw.get("pain_points", [])
+    local_classifications: dict[int, dict] = {}
+    if raw_points:
+        try:
+            local_classifications = await local_classifier_service.classify_pain_points([
+                {
+                    "index": idx,
+                    "company_ticker": company.ticker,
+                    "text": pp.get("text", ""),
+                    "financial_scale": pp.get("financial_scale") or None,
+                    "filing_date": next(
+                        (
+                            chunk_meta_map[cid].filing_date
+                            for cid in pp.get("chunk_ids", [])
+                            if cid in chunk_meta_map
+                        ),
+                        "",
+                    ),
+                    "category_hint": pp.get("category", ""),
+                    "severity_hint": pp.get("severity", ""),
+                    "buyer_owner_hint": pp.get("buyer_owner_hint", ""),
+                    "recurrence_hint": pp.get("recurrence_hint", ""),
+                    "confidence_hint": pp.get("confidence", ""),
+                }
+                for idx, pp in enumerate(raw_points)
+            ])
+        except LocalClassifierError:
+            cost_tracker.record_ollama_fallback()
+            local_classifications = {}
 
     pain_points: list[PainPoint] = []
-    for pp in raw.get("pain_points", []):
+    for idx, pp in enumerate(raw_points):
         valid_ids = [cid for cid in pp.get("chunk_ids", []) if cid in valid_chunk_ids]
         if not valid_ids:
             continue
         meta = chunk_meta_map.get(valid_ids[0])
+        classified = local_classifications.get(idx, {})
         pain_points.append(PainPoint(
             company_ticker=company.ticker,
             text=pp.get("text", ""),
-            category=pp.get("category", "operational"),
+            category=classified.get("category", pp.get("category", "operational")),
             financial_scale=pp.get("financial_scale") or None,
             filing_date=meta.filing_date if meta else "",
             form_type=meta.form_type if meta else "",
             accession_number=meta.accession_number if meta else "",
             cik=meta.cik if meta else "",
             chunk_ids=valid_ids,
-            confidence=pp.get("confidence", "medium"),
-            severity=pp.get("severity", "moderate"),
-            buyer_owner_hint=_normalize_buyer_owner(pp.get("buyer_owner_hint", "unknown")),
-            recurrence_hint=_normalize_persistence(pp.get("recurrence_hint", "unclear")),
+            confidence=classified.get("confidence", pp.get("confidence", "medium")),
+            severity=classified.get("severity", pp.get("severity", "moderate")),
+            buyer_owner_hint=_normalize_buyer_owner(classified.get("buyer_owner_hint", pp.get("buyer_owner_hint", "unknown"))),
+            recurrence_hint=_normalize_persistence(classified.get("recurrence_hint", pp.get("recurrence_hint", "unclear"))),
         ))
     return pain_points
 
@@ -376,6 +408,16 @@ async def _analyze_buyer_ownership(cluster: GapCluster, company_chunks: dict[str
         }
         for pp in cluster.pain_points
     ]
+    local_payload = {
+        "gap_cluster": cluster.theme,
+        "description": cluster.description,
+        "pain_points": payload,
+        "relevant_excerpts": _build_context(relevant),
+    }
+    try:
+        return await local_classifier_service.classify_buyer_ownership(local_payload)
+    except LocalClassifierError:
+        cost_tracker.record_ollama_fallback()
     return await _create_json_completion(
         model=OPENAI_WORKER_MODEL,
         messages=[
@@ -405,6 +447,15 @@ async def _analyze_urgency_persistence(cluster: GapCluster) -> dict:
         }
         for pp in cluster.pain_points
     ]
+    local_payload = {
+        "gap_cluster": cluster.theme,
+        "description": cluster.description,
+        "pain_points": payload,
+    }
+    try:
+        return await local_classifier_service.classify_urgency_persistence(local_payload)
+    except LocalClassifierError:
+        cost_tracker.record_ollama_fallback()
     return await _create_json_completion(
         model=OPENAI_WORKER_MODEL,
         messages=[
@@ -422,6 +473,18 @@ async def _analyze_urgency_persistence(cluster: GapCluster) -> dict:
 
 
 async def _analyze_commercialization_difficulty(cluster: GapCluster) -> dict:
+    local_payload = {
+        "gap_cluster": cluster.theme,
+        "description": cluster.description,
+        "likely_buyer_owners": cluster.buyer_owners,
+        "structural_constraint_confidence": cluster.incumbents_stuck_confidence,
+        "hard_constraints": cluster.hard_constraints,
+        "soft_constraints": cluster.soft_constraints,
+    }
+    try:
+        return await local_classifier_service.classify_commercialization_difficulty(local_payload)
+    except LocalClassifierError:
+        cost_tracker.record_ollama_fallback()
     return await _create_json_completion(
         model=OPENAI_WORKER_MODEL,
         messages=[
@@ -710,10 +773,22 @@ async def answer_opportunity_memo_chat(req: OpportunityMemoChatRequest) -> Oppor
         "theme": cluster.theme,
         "description": cluster.description,
         "frequency": f"{cluster.frequency}/{cluster.total_companies}",
+        "company_tickers": cluster.company_tickers,
         "buyer_owners": cluster.buyer_owners,
         "hard_constraints": cluster.hard_constraints,
         "soft_constraints": cluster.soft_constraints,
         "disconfirming_evidence": cluster.disconfirming_evidence,
+        "pain_points": [
+            {
+                "company_ticker": pain_point.company_ticker,
+                "text": pain_point.text,
+                "severity": pain_point.severity,
+                "form_type": pain_point.form_type,
+                "filing_date": pain_point.filing_date,
+                "chunk_ids": pain_point.chunk_ids,
+            }
+            for pain_point in cluster.pain_points
+        ],
     }
 
     raw = await _create_json_completion(

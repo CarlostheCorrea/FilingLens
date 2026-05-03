@@ -30,6 +30,9 @@ class _Accumulator:
     prompt_tokens:      int   = 0
     completion_tokens:  int   = 0
     embedding_tokens:   int   = 0
+    ollama_calls:       int   = 0
+    ollama_tokens:      int   = 0
+    ollama_fallbacks:   int   = 0
 
 
 _ctx: ContextVar[_Accumulator | None] = ContextVar("cost_ctx", default=None)
@@ -50,6 +53,23 @@ def record_llm(model: str, prompt_tokens: int, completion_tokens: int) -> None:
     acc.prompt_tokens     += prompt_tokens
     acc.completion_tokens += completion_tokens
     acc.llm_calls         += 1
+
+
+def record_ollama(prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+    """Record one Ollama local-model call. Cost is always $0."""
+    acc = _ctx.get()
+    if acc is None:
+        return
+    acc.ollama_calls  += 1
+    acc.ollama_tokens += prompt_tokens + completion_tokens
+
+
+def record_ollama_fallback() -> None:
+    """Record one Ollama task that failed and fell back to OpenAI."""
+    acc = _ctx.get()
+    if acc is None:
+        return
+    acc.ollama_fallbacks += 1
 
 
 def record_embedding(model: str, tokens: int) -> None:
@@ -75,4 +95,7 @@ def get_summary() -> dict:
         "completion_tokens": acc.completion_tokens,
         "embedding_tokens":  acc.embedding_tokens,
         "total_tokens":      total,
+        "ollama_calls":      acc.ollama_calls,
+        "ollama_tokens":     acc.ollama_tokens,
+        "ollama_fallbacks":  acc.ollama_fallbacks,
     }

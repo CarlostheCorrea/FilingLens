@@ -45,8 +45,9 @@ _openai = OpenAI(api_key=OPENAI_API_KEY)
 def _embed(inputs: list[str]) -> list[list[float]]:
     """Embed a list of strings, record token usage, return vectors."""
     response = _openai.embeddings.create(model=OPENAI_EMBEDDING_MODEL, input=inputs)
-    if response.usage:
-        cost_tracker.record_embedding(OPENAI_EMBEDDING_MODEL, response.usage.total_tokens)
+    usage = getattr(response, "usage", None)
+    if usage:
+        cost_tracker.record_embedding(OPENAI_EMBEDDING_MODEL, usage.total_tokens)
     return [item.embedding for item in response.data]
 _chroma = chromadb.PersistentClient(
     path=CHROMA_DIR,

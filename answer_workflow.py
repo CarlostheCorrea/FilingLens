@@ -34,7 +34,10 @@ from openai import AsyncOpenAI, RateLimitError
 
 import cost_tracker
 import rag_pipeline
+from services import local_classifier_service
+from services.local_classifier_service import LocalClassifierError
 from services.xbrl_context_service import build_xbrl_context, is_quantitative
+from services.sanitizer import wrap_filing_content
 from config import (
     OPENAI_API_KEY,
     OPENAI_MODEL,
@@ -94,11 +97,12 @@ async def _create_json_completion(*, model: str, messages: list[dict], max_retri
                 messages=messages,
                 response_format={"type": "json_object"},
             )
-            if response.usage:
+            usage = getattr(response, "usage", None)
+            if usage:
                 cost_tracker.record_llm(
                     model,
-                    response.usage.prompt_tokens,
-                    response.usage.completion_tokens,
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
                 )
             return json.loads(response.choices[0].message.content or "{}")
         except RateLimitError as error:
@@ -224,13 +228,13 @@ async def company_worker(state: dict) -> dict:
             }]
         }
 
-    context = "\n---\n".join(
+    context = wrap_filing_content("\n---\n".join(
         f"[chunk_id: {c.chunk_id}]\n"
         f"Filing: {c.metadata.form_type} {c.metadata.filing_date}\n"
         f"Section: {c.metadata.item_section}\n"
         f"Text:\n{c.text}"
         for c in chunks
-    )
+    ))
 
     raw = await _create_json_completion(
         model=OPENAI_WORKER_MODEL,
@@ -252,13 +256,36 @@ async def company_worker(state: dict) -> dict:
     ]
     if not evidence_chunk_ids:
         evidence_chunk_ids = [c.chunk_id for c in chunks[:3]]
+    claims = raw.get("claims", [])
+    if claims:
+        chunk_by_id = {c.chunk_id: c for c in chunks}
+        try:
+            local_confidence = await local_classifier_service.classify_claim_confidence([
+                {
+                    "claim_id": claim.get("claim_id", f"{ticker}_claim_{idx + 1}"),
+                    "text": claim.get("text", ""),
+                    "confidence_hint": claim.get("confidence", "medium"),
+                    "supporting_excerpts": [
+                        chunk_by_id[cid].text[:500]
+                        for cid in claim.get("supporting_chunk_ids", [])
+                        if cid in chunk_by_id
+                    ],
+                }
+                for idx, claim in enumerate(claims)
+            ])
+            for idx, claim in enumerate(claims):
+                claim_id = claim.get("claim_id", f"{ticker}_claim_{idx + 1}")
+                if claim_id in local_confidence:
+                    claim["confidence"] = local_confidence[claim_id]
+        except LocalClassifierError:
+            pass
 
     return {
         "worker_results": [{
             "ticker": ticker,
             "company_name": company_name,
             "summary": raw.get("summary", ""),
-            "claims": raw.get("claims", []),
+            "claims": claims,
             "gaps": raw.get("gaps", []),
             "evidence_chunk_ids": evidence_chunk_ids,
             "retrieved_chunk_ids": [c.chunk_id for c in chunks],

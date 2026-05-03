@@ -7,7 +7,10 @@ import uuid
 from bisect import bisect_left
 
 from answer_workflow import _create_json_completion
-from services.xbrl_context_service import build_xbrl_context
+from services.xbrl_context_service import build_xbrl_context, is_quantitative
+from services import local_classifier_service
+from services.local_classifier_service import LocalClassifierError
+from services.sanitizer import wrap_filing_content
 from config import (
     CHANGE_DETECTION_SYSTEM_PROMPT,
     CHANGE_STATE_DIR,
@@ -53,6 +56,15 @@ _ALLOWED_CATEGORIES = {
     "geographic_or_segment_shift",
     "market_positioning_change",
 }
+_XBRL_NUMERIC_KEYS = [
+    "Revenues",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "SalesRevenueNet",
+    "GrossProfit",
+    "OperatingIncomeLoss",
+    "NetIncomeLoss",
+    "SellingGeneralAndAdministrativeExpense",
+]
 
 
 def _change_key(req: ChangeIntelligenceRequest) -> str:
@@ -179,13 +191,138 @@ def _build_window(after_filing: Filing, before_filing: Filing) -> FilingComparis
 
 
 def _build_context(chunks: list[Chunk]) -> str:
-    return "\n---\n".join(
+    raw = "\n---\n".join(
         f"[chunk_id: {chunk.chunk_id}]\n"
         f"Filing: {chunk.metadata.form_type} {chunk.metadata.filing_date}\n"
         f"Section: {chunk.metadata.item_section}\n"
         f"Text:\n{chunk.text}"
         for chunk in chunks
     )
+    return wrap_filing_content(raw)
+
+
+def _fmt_xbrl_value(value: float | None, unit: str) -> str:
+    if value is None:
+        return "—"
+    abs_v = abs(value)
+    neg = value < 0
+    prefix = "(" if neg else ""
+    suffix = ")" if neg else ""
+    if unit == "USD":
+        if abs_v >= 1e9:
+            return f"{prefix}${abs_v / 1e9:.2f}B{suffix}"
+        if abs_v >= 1e6:
+            return f"{prefix}${abs_v / 1e6:.1f}M{suffix}"
+        return f"{prefix}${abs_v:,.0f}{suffix}"
+    return str(value)
+
+
+def _pct(numerator: float | None, denominator: float | None) -> str | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return f"{(numerator / denominator) * 100.0:.1f}%"
+
+
+def _xbrl_entry_for_filing(entries: list[dict], filing: Filing) -> dict | None:
+    exact = [
+        entry for entry in entries
+        if entry.get("form") == filing.form_type and entry.get("filed") == filing.filing_date
+    ]
+    if exact:
+        return sorted(exact, key=lambda item: item.get("period_end", ""), reverse=True)[0]
+
+    same_year = [
+        entry for entry in entries
+        if entry.get("form") == filing.form_type
+        and str(entry.get("filed", "")).startswith(filing.filing_date[:4])
+    ]
+    if same_year:
+        return sorted(same_year, key=lambda item: item.get("filed", ""), reverse=True)[0]
+
+    return None
+
+
+async def _build_xbrl_chunks_for_filings(company: Company, filings: list[Filing], query: str) -> dict[str, list[Chunk]]:
+    if not is_quantitative(query) or not company.cik:
+        return {}
+
+    annual_filings = [filing for filing in filings if filing.form_type in _ANNUAL_FORMS]
+    if not annual_filings:
+        return {}
+
+    try:
+        raw = await get_mcp_client().get_xbrl_facts(company.cik)
+    except Exception:
+        return {}
+
+    facts = raw.get("facts", {}) if isinstance(raw, dict) else {}
+    if not facts:
+        return {}
+
+    chunks_by_accession: dict[str, list[Chunk]] = {}
+    for filing in annual_filings:
+        selected_entries: dict[str, tuple[dict, dict]] = {}
+        for metric_key in _XBRL_NUMERIC_KEYS:
+            metric = facts.get(metric_key)
+            if not metric:
+                continue
+            entry = _xbrl_entry_for_filing(metric.get("facts", []), filing)
+            if entry:
+                selected_entries[metric_key] = (metric, entry)
+
+        if not selected_entries:
+            continue
+
+        revenue_entry = selected_entries.get("Revenues") or selected_entries.get("RevenueFromContractWithCustomerExcludingAssessedTax") or selected_entries.get("SalesRevenueNet")
+        gross_entry = selected_entries.get("GrossProfit")
+        operating_entry = selected_entries.get("OperatingIncomeLoss")
+        sga_entry = selected_entries.get("SellingGeneralAndAdministrativeExpense")
+
+        revenue_value = revenue_entry[1].get("value") if revenue_entry else None
+        gross_value = gross_entry[1].get("value") if gross_entry else None
+        operating_value = operating_entry[1].get("value") if operating_entry else None
+        sga_value = sga_entry[1].get("value") if sga_entry else None
+
+        lines = [
+            f"XBRL annual metrics for {filing.form_type} filed {filing.filing_date}.",
+            f"Company: {company.name} ({company.ticker}).",
+        ]
+        for metric_key, (metric, entry) in selected_entries.items():
+            lines.append(
+                f"{metric.get('label', metric_key)}: {_fmt_xbrl_value(entry.get('value'), metric.get('unit', ''))} "
+                f"(period end {entry.get('period_end', '—')})."
+            )
+
+        gross_margin = _pct(gross_value, revenue_value)
+        operating_margin = _pct(operating_value, revenue_value)
+        sga_ratio = _pct(sga_value, revenue_value)
+        if gross_margin:
+            lines.append(f"Gross margin: {gross_margin}.")
+        if operating_margin:
+            lines.append(f"Operating margin: {operating_margin}.")
+        if sga_ratio:
+            lines.append(f"SG&A as a percentage of revenue: {sga_ratio}.")
+
+        chunk_id = f"{company.ticker}_{filing.form_type.replace('-', '')}_{filing.filing_date[:4]}_xbrl_00"
+        chunks_by_accession[filing.accession_number] = [
+            Chunk(
+                chunk_id=chunk_id,
+                text="\n".join(lines),
+                metadata={
+                    "chunk_id": chunk_id,
+                    "company_ticker": company.ticker,
+                    "company_name": company.name,
+                    "cik": company.cik,
+                    "accession_number": filing.accession_number,
+                    "form_type": filing.form_type,
+                    "filing_date": filing.filing_date,
+                    "item_section": "xbrl_income_statement",
+                    "chunk_index": 0,
+                },
+            )
+        ]
+
+    return chunks_by_accession
 
 
 def _build_evidence_items(chunks: list[Chunk], chunk_ids: list[str]) -> list[ChangeEvidenceItem]:
@@ -353,6 +490,30 @@ async def _detect_window_changes(
             )
         )
 
+    if cards:
+        try:
+            local_labels = await local_classifier_service.classify_change_cards([
+                {
+                    "change_id": card.change_id,
+                    "summary": card.summary,
+                    "category_hint": card.category,
+                    "importance_hint": card.importance,
+                    "confidence_hint": card.confidence,
+                    "before_evidence": [item.excerpt[:500] for item in card.before_evidence],
+                    "after_evidence": [item.excerpt[:500] for item in card.after_evidence],
+                }
+                for card in cards
+            ])
+            for card in cards:
+                labels = local_labels.get(card.change_id)
+                if not labels:
+                    continue
+                card.category = labels["category"]
+                card.importance = labels["importance"]
+                card.confidence = labels["confidence"]
+        except LocalClassifierError:
+            cost_tracker.record_ollama_fallback()
+
     return raw.get("window_summary", ""), cards, raw.get("gaps", [])
 
 
@@ -484,6 +645,13 @@ async def change_intelligence(req: ChangeIntelligenceRequest, force_refresh: boo
     filing_records.sort(key=lambda filing: filing.filing_date, reverse=True)
     if len(filing_records) < 2:
         raise ValueError(f"Not enough filings could be loaded for {company.ticker} to compare over time.")
+
+    xbrl_chunks_by_accession = await _build_xbrl_chunks_for_filings(company, filing_records, req.query)
+    for accession, xbrl_chunks in xbrl_chunks_by_accession.items():
+        existing = chunks_by_accession.setdefault(accession, [])
+        known_ids = {chunk.chunk_id for chunk in existing}
+        existing.extend([chunk for chunk in xbrl_chunks if chunk.chunk_id not in known_ids])
+
     windows: list[FilingComparisonWindow] = []
     change_cards: list[ChangeCard] = []
     for idx in range(len(filing_records) - 1):

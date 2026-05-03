@@ -9,6 +9,12 @@ OPENAI_WORKER_MODEL = os.getenv("OPENAI_WORKER_MODEL", "gpt-4o-mini")
 OPENAI_JUDGE_MODEL = os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o-mini")
 OPENAI_RAGAS_MODEL = os.getenv("OPENAI_RAGAS_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+LOCAL_CLASSIFIER_ENABLED = os.getenv("LOCAL_CLASSIFIER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+LOCAL_CLASSIFIER_TIMEOUT_SECONDS = float(os.getenv("LOCAL_CLASSIFIER_TIMEOUT_SECONDS", "30"))
+LOCAL_CLASSIFIER_FALLBACK_TO_OPENAI = os.getenv("LOCAL_CLASSIFIER_FALLBACK_TO_OPENAI", "true").lower() in {"1", "true", "yes", "on"}
+LOCAL_SECONDARY_JUDGE_ENABLED = os.getenv("LOCAL_SECONDARY_JUDGE_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 EDGAR_IDENTITY = os.getenv("EDGAR_IDENTITY", "FilingLens user filinglens@example.com")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -547,6 +553,7 @@ OPPORTUNITY_MEMO_CHAT_SYSTEM_PROMPT = """You are answering follow-up questions a
 You will receive:
 - the memo itself
 - the supporting gap cluster
+- the specific companies and pain points behind that cluster
 - the memo's supporting filing evidence excerpts
 - optional prior memo-specific chat history
 - the user's follow-up question
@@ -558,11 +565,12 @@ Rules:
 4. Every supported or partially supported answer must cite 1-4 chunk_ids from the supplied evidence.
 5. Prefer NEW evidence that has not already been cited earlier in this memo chat when it is relevant.
 6. If no additional evidence beyond earlier citations supports the follow-up, do not force repeated citations; say so in the note.
+7. If the user asks who has the problem, which companies are affected, or which airlines / banks / companies are named, use the supplied cluster companies and pain-point evidence directly when supported.
 5. support_level must be one of:
    - supported: the evidence clearly supports the answer
    - partial: the evidence supports part of the answer, but important pieces remain uncertain
    - unsupported: the current filings do not support the conclusion
-7. Keep the answer concise and founder-oriented.
+8. Keep the answer concise and founder-oriented.
 
 Return JSON:
 {
@@ -710,6 +718,54 @@ Return JSON with ONLY the list of classified tables:
     }
   ]
 }"""
+
+LOCAL_TABLE_CLASSIFIER_PROMPT = """Classify SEC filing tables using only the supplied headers and sample rows.
+Return only JSON with {"tables": [{"table_id": "...", "title": "...", "category": "..."}]}.
+Allowed categories: income_statement, balance_sheet, cash_flow, segment, equity_rollforward, debt_schedule, quarterly_summary, other.
+If uncertain, use category "other". Do not invent values."""
+
+LOCAL_PAIN_POINT_CLASSIFIER_PROMPT = """Classify already-extracted SEC filing pain points.
+Do not add, remove, or rewrite pain points. Return only JSON with:
+{"pain_points": [{"index": 0, "category": "...", "severity": "...", "buyer_owner_hint": "...", "recurrence_hint": "...", "confidence": "..."}]}.
+Allowed categories: operational, regulatory, supply_chain, technology, competitive, financial.
+Allowed severity: mild, moderate, severe.
+Allowed buyer_owner_hint: operations, IT, finance, compliance, procurement, distribution, customer_success, management, unknown.
+Allowed recurrence_hint: recurring, worsening, recent, episodic, shrinking, unclear.
+Allowed confidence: high, medium, low."""
+
+LOCAL_BUYER_OWNERSHIP_PROMPT = """Identify likely internal buyer or owner teams for a filing-grounded market gap.
+Return only JSON with {"buyer_owners": ["..."], "primary_buyer_owner": "...", "ownership_rationale": "..."}.
+Allowed buyer owners: operations, IT, finance, compliance, procurement, distribution, customer_success, management, unknown.
+Use at most 3 buyer owners. If uncertain, use unknown."""
+
+LOCAL_URGENCY_PERSISTENCE_PROMPT = """Classify urgency and persistence for a filing-grounded market gap.
+Return only JSON with {"urgency_level": "...", "persistence_level": "...", "why_now": "...", "disconfirming_evidence": ["..."]}.
+Allowed urgency_level: high, medium, low.
+Allowed persistence_level: recurring, worsening, recent, episodic, shrinking, unclear.
+Keep why_now short and grounded in the provided filing dates and pain points."""
+
+LOCAL_COMMERCIALIZATION_DIFFICULTY_PROMPT = """Classify commercialization difficulty for a startup addressing a filing-grounded market gap.
+Return only JSON with {"adoption_difficulty": "...", "difficulty_rationale": "..."}.
+Allowed adoption_difficulty: low, medium, high.
+Base the rating on buyer complexity, integration burden, regulation, procurement friction, and incumbent constraints."""
+
+LOCAL_CHANGE_CARD_CLASSIFIER_PROMPT = """Classify already-detected filing change cards.
+Do not add, remove, or rewrite changes. Return only JSON with:
+{"changes": [{"change_id": "...", "category": "...", "importance": "...", "confidence": "..."}]}.
+Allowed categories: new_risk_introduced, risk_removed_or_deemphasized, strategy_emphasis_increased, capital_allocation_change, pricing_or_margin_change, guidance_or_outlook_change, geographic_or_segment_shift, market_positioning_change.
+Allowed importance: high, medium, low.
+Allowed confidence: high, medium, low."""
+
+LOCAL_CLAIM_CONFIDENCE_PROMPT = """Rate confidence for already-extracted SEC filing claims.
+Do not rewrite claims or evidence IDs. Return only JSON with:
+{"claims": [{"claim_id": "...", "confidence": "..."}]}.
+Allowed confidence: high, medium, low.
+Use high only when the claim is directly supported by the cited excerpts."""
+
+LOCAL_SECONDARY_JUDGE_PROMPT = """Score a citation-backed SEC filing analysis as an internal secondary judge.
+Return only JSON with:
+{"helpfulness": 1-5, "clarity": 1-5, "grounding": 1-5, "citation_quality": 1-5, "overclaiming_risk": "low|medium|high", "overall_verdict": "strong|mixed|weak", "summary": "...", "strengths": ["..."], "concerns": ["..."]}.
+This is an internal signal only. Be strict about unsupported claims."""
 
 MARKET_SUMMARY_SYSTEM_PROMPT = """You are writing two concise summaries of a market gap analysis based on SEC filings.
 

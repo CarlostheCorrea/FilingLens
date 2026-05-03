@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from enum import Enum
+from services.sanitizer import sanitize_query, validate_ticker, sanitize_short_text
 
 
 class Company(BaseModel):
@@ -104,6 +105,9 @@ class CostSummary(BaseModel):
     completion_tokens: int = 0
     embedding_tokens: int = 0
     total_tokens: int = 0
+    ollama_calls: int = 0
+    ollama_tokens: int = 0
+    ollama_fallbacks: int = 0
 
 
 class JudgeEvaluation(BaseModel):
@@ -163,11 +167,21 @@ class VerifyRequest(BaseModel):
 class ProposeRequest(BaseModel):
     query: str
 
+    @field_validator("query")
+    @classmethod
+    def _sanitize_query(cls, v: str) -> str:
+        return sanitize_query(v)
+
 
 class ManualScopeRequest(BaseModel):
     tickers: list[str]
     form_types: list[str]
     date_range: list[str]  # [start, end]
+
+    @field_validator("tickers")
+    @classmethod
+    def _validate_tickers(cls, v: list[str]) -> list[str]:
+        return [validate_ticker(t) for t in v]
 
 
 class IngestRequest(BaseModel):
@@ -177,6 +191,11 @@ class IngestRequest(BaseModel):
 class AnswerRequest(BaseModel):
     proposal_id: str
     query: str
+
+    @field_validator("query")
+    @classmethod
+    def _sanitize_query(cls, v: str) -> str:
+        return sanitize_query(v)
 
 
 class ChunkMetadata(BaseModel):
@@ -210,6 +229,16 @@ class CompareRequest(BaseModel):
     form_types: list[str]
     filing_date_range: list[str]
     price_lookback: str = "3M"
+
+    @field_validator("ticker_a", "ticker_b")
+    @classmethod
+    def _validate_tickers(cls, v: str) -> str:
+        return validate_ticker(v)
+
+    @field_validator("query")
+    @classmethod
+    def _sanitize_query(cls, v: str) -> str:
+        return sanitize_query(v)
 
 
 class StockPricePoint(BaseModel):
@@ -283,6 +312,16 @@ class ChangeIntelligenceRequest(BaseModel):
     filing_date_range: list[str]
     max_filings: int = 3
     price_lookback: str = "3M"
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, v: str) -> str:
+        return validate_ticker(v)
+
+    @field_validator("query")
+    @classmethod
+    def _sanitize_query(cls, v: str) -> str:
+        return sanitize_query(v)
 
 
 class ChangeEvidenceItem(BaseModel):
@@ -431,6 +470,11 @@ class OpportunityMemoChatRequest(BaseModel):
     question: str
     history: list[OpportunityMemoChatTurn] = Field(default_factory=list)
 
+    @field_validator("question")
+    @classmethod
+    def _sanitize_question(cls, v: str) -> str:
+        return sanitize_short_text(v, max_length=1_000, field_name="question")
+
 
 class OpportunityMemoChatResponse(BaseModel):
     run_id: str
@@ -502,6 +546,11 @@ class MarketGapRequest(BaseModel):
     companies: list[Company]
     form_types: list[str]
     filing_date_range: list[str]
+
+    @field_validator("query")
+    @classmethod
+    def _sanitize_query(cls, v: str) -> str:
+        return sanitize_query(v)
 
 
 class MarketGapResponse(BaseModel):

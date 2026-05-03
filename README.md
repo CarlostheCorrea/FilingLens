@@ -1,8 +1,6 @@
 # FilingLens — SEC Filing Intelligence Workspace
 
-FilingLens is a browser-based SEC EDGAR research workspace for public-company analysis. It combines **RAG**, a **custom MCP server**, **human-in-the-loop review**, **multi-agent answer generation**, **XBRL financial data**, **LLM-as-a-judge**, and **RAGAS** to turn SEC filings into production-style research outputs.
-
-I also created this project using a local [Ollama LLM](https://github.com/CarlostheCorrea/FilingLens-_Open)
+FilingLens is a browser-based SEC EDGAR research workspace for public-company analysis. It combines **RAG**, a **custom MCP server**, **human-in-the-loop review**, **multi-agent answer generation**, **XBRL financial data**, **LLM-as-a-judge**, **RAGAS**, and optional **local Ollama classifiers** to turn SEC filings into production-style research outputs.
 
 The app is built as a single FastAPI + HTML/CSS/JS workspace with five user-facing modes:
 
@@ -84,6 +82,7 @@ Pull structured financial data directly from EDGAR.
 - claim-level verification workflow
 - automated LLM judging
 - reference-free RAGAS scoring for Research Answer
+- prompt injection protection via input sanitization and filing content isolation
 
 ---
 
@@ -91,6 +90,11 @@ Pull structured financial data directly from EDGAR.
 
 ```text
 Browser UI (HTML / CSS / JS)
+    ↓
+Input Sanitizer (services/sanitizer.py)
+    ├── query injection detection + unicode normalization
+    ├── ticker format validation
+    └── filing content XML wrapping (indirect injection defence)
     ↓
 FastAPI app
     ├── Scope proposal / approval
@@ -100,7 +104,7 @@ FastAPI app
     ├── Compare Companies
     ├── Filing Change Intelligence
     ├── Market Gap Discovery
-    ├── Financial Data (XBRL + tables)
+    ├── Financial Data (XBRL)
     └── Library / logs / data controls
     ↓
 MCP client (stdio subprocess)
@@ -120,6 +124,9 @@ OpenAI API
     ├── judge scoring
     ├── RAGAS evaluation
     └── embeddings
+
+Ollama (optional, local)
+    └── lightweight classification tasks
 
 ChromaDB
     ├── persistent sec_filings collection
@@ -276,6 +283,19 @@ OPENAI_RAGAS_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 ```
 
+Optional local Ollama classifier settings:
+
+```text
+OLLAMA_MODEL=llama3.1:8b
+OLLAMA_BASE_URL=http://localhost:11434
+LOCAL_CLASSIFIER_ENABLED=true
+LOCAL_CLASSIFIER_TIMEOUT_SECONDS=30
+LOCAL_CLASSIFIER_FALLBACK_TO_OPENAI=true
+LOCAL_SECONDARY_JUDGE_ENABLED=false
+```
+
+Ollama is used only for constrained local classification tasks such as table category, pain-point category/severity, buyer owner, urgency, adoption difficulty, change-card labels, and claim confidence. It is not used for embeddings, final synthesis, RAGAS, or the primary LLM judge. Embeddings use `OPENAI_EMBEDDING_MODEL`, which defaults to `text-embedding-3-small`.
+
 ### 3. Run the app
 
 ```bash
@@ -371,6 +391,16 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Important Implementation Notes
 
+### Prompt injection protection
+
+All user-supplied inputs are sanitized by `services/sanitizer.py` before reaching any LLM call. Three layers:
+
+1. **Query sanitization** — unicode normalization (NFKC), control character removal, 2,000-character limit, and detection of 15+ injection phrase families. Raises a clear error on detection rather than silently stripping.
+2. **Ticker validation** — strict regex enforcing 1–5 uppercase letters with optional dot/dash suffix (covers BRK.A, BF.B). Rejects anything that does not match.
+3. **Filing content wrapping** — SEC filing chunks inserted into LLM prompts are wrapped in `<filing_content>` XML tags, signalling to the model that the enclosed text is external data to analyse, not instructions to follow. Defends against indirect injection from adversarial text in filings.
+
+Sanitization is enforced automatically via Pydantic `@field_validator` on all request models — it cannot be bypassed at the route level.
+
 ### Date ranges
 
 Date-driven UI sections now normalize the end date to the current date in the proposal flows so stale fixed end dates do not linger in the forms.
@@ -400,14 +430,16 @@ The follow-up chat under each opportunity memo is:
 |---|---|
 | `main.py` | FastAPI entry point |
 | `config.py` | env settings, prompt templates, constants |
-| `models.py` | shared Pydantic models |
+| `models.py` | shared Pydantic models with input validators |
 | `agent.py` | scope proposal logic |
 | `answer_workflow.py` | LangGraph supervisor workflow for Market Analyst |
 | `mcp_server.py` | custom MCP server |
 | `mcp_client.py` | backend MCP client |
 | `edgar_client.py` | SEC/edgartools helper layer |
 | `rag_pipeline.py` | chunking, embeddings, retrieval, vector refresh |
-| `services/` | feature services |
+| `services/sanitizer.py` | prompt injection protection — query sanitization, ticker validation, filing content wrapping |
+| `services/xbrl_context_service.py` | XBRL fetch and quantitative query detection |
+| `services/` | feature services (compare, change intelligence, market gap, judge, RAGAS, etc.) |
 | `routes/` | API routes |
 | `templates/index.html` | main app shell |
 | `static/app.js` | frontend behavior |
@@ -426,6 +458,7 @@ The follow-up chat under each opportunity memo is:
 | LLM (primary) | GPT-4o |
 | Worker / judge / RAGAS model defaults | GPT-4o-mini |
 | Embeddings | `text-embedding-3-small` |
+| Local classifiers | Ollama `llama3.1:8b` with OpenAI fallback |
 | RAG evaluation | `ragas` |
 | Vector store | ChromaDB |
 | SEC access | SEC EDGAR + `edgartools` |

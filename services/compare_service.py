@@ -8,6 +8,7 @@ from bisect import bisect_left
 
 from answer_workflow import _create_json_completion
 from services.xbrl_context_service import build_xbrl_context
+from services.sanitizer import wrap_filing_content
 from config import (
     COMPARE_COMPANY_SYSTEM_PROMPT,
     COMPARE_STATE_DIR,
@@ -153,13 +154,14 @@ def _select_compare_filings(filings: list[dict], allowed_forms: list[str]) -> li
 
 
 def _build_company_context(chunks: list[Chunk]) -> str:
-    return "\n---\n".join(
+    raw = "\n---\n".join(
         f"[chunk_id: {chunk.chunk_id}]\n"
         f"Filing: {chunk.metadata.form_type} {chunk.metadata.filing_date}\n"
         f"Section: {chunk.metadata.item_section}\n"
         f"Text:\n{chunk.text}"
         for chunk in chunks
     )
+    return wrap_filing_content(raw)
 
 
 def _build_evidence_items(chunks: list[Chunk], evidence_chunk_ids: list[str]) -> list[CompareEvidenceItem]:

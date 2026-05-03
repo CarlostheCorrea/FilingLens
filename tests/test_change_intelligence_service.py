@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -179,3 +180,129 @@ def test_change_intelligence_endpoint_returns_schema(monkeypatch):
     assert "overall_summary" in data
     assert "comparison_windows" in data
     assert "change_cards" in data
+
+
+@pytest.mark.asyncio
+async def test_change_intelligence_uses_xbrl_metrics_for_margin_change_cards(monkeypatch, tmp_path):
+    from models import ChangeIntelligenceRequest, Company
+    from services import change_intelligence_service as svc
+
+    company = Company(ticker="STZ", name="Constellation Brands, Inc.", cik="0016940", rationale="Change intelligence workflow")
+    before_chunk = _chunk_for("STZ", "0000016918-25-000022", "10-K", "2025-04-23", "Older filing discusses portfolio priorities.")
+    after_chunk = _chunk_for("STZ", "0000016918-26-000011", "10-K", "2026-04-22", "New filing discusses operational execution.")
+
+    monkeypatch.setattr(svc, "_cache_path", lambda key: str(tmp_path / f"{key}.json"))
+    monkeypatch.setattr(svc, "_company_from_ticker", lambda ticker: company)
+    monkeypatch.setattr(
+        svc,
+        "_retrieve_filing_chunks",
+        lambda query, filing_text: [after_chunk] if filing_text["metadata"]["filing_date"] == "2026-04-22" else [before_chunk],
+    )
+    monkeypatch.setattr(svc.logging_utils, "log_change_intelligence", lambda *args, **kwargs: None)
+    monkeypatch.setattr(svc, "fetch_stock_series", lambda companies, lookback: [])
+
+    class FakeMCP:
+        async def list_filings(self, cik, form_types, since_date, until_date):
+            return [
+                {"accession_number": "0000016918-26-000011", "form_type": "10-K", "filing_date": "2026-04-22"},
+                {"accession_number": "0000016918-25-000022", "form_type": "10-K", "filing_date": "2025-04-23"},
+            ]
+
+        async def fetch_filing(self, accession_number, cik=None):
+            filing_date = "2026-04-22" if accession_number.endswith("000011") else "2025-04-23"
+            return {
+                "metadata": {
+                    "ticker": "STZ",
+                    "company_name": "Constellation Brands, Inc.",
+                    "cik": "0016940",
+                    "accession_number": accession_number,
+                    "form_type": "10-K",
+                    "filing_date": filing_date,
+                },
+                "sections": {"item_7": "filing text"},
+            }
+
+        async def get_xbrl_facts(self, cik):
+            return {
+                "facts": {
+                    "Revenues": {
+                        "label": "Revenue (Total)",
+                        "unit": "USD",
+                        "category": "income_statement",
+                        "facts": [
+                            {"period_end": "2026-02-28", "value": 9148000000, "form": "10-K", "filed": "2026-04-22"},
+                            {"period_end": "2025-02-28", "value": 10210000000, "form": "10-K", "filed": "2025-04-23"},
+                        ],
+                    },
+                    "GrossProfit": {
+                        "label": "Gross Profit",
+                        "unit": "USD",
+                        "category": "income_statement",
+                        "facts": [
+                            {"period_end": "2026-02-28", "value": 4710000000, "form": "10-K", "filed": "2026-04-22"},
+                            {"period_end": "2025-02-28", "value": 5310000000, "form": "10-K", "filed": "2025-04-23"},
+                        ],
+                    },
+                    "SellingGeneralAndAdministrativeExpense": {
+                        "label": "SG&A Expense",
+                        "unit": "USD",
+                        "category": "income_statement",
+                        "facts": [
+                            {"period_end": "2026-02-28", "value": 1858000000, "form": "10-K", "filed": "2026-04-22"},
+                            {"period_end": "2025-02-28", "value": 1995000000, "form": "10-K", "filed": "2025-04-23"},
+                        ],
+                    },
+                }
+            }
+
+    monkeypatch.setattr(svc, "get_mcp_client", lambda: FakeMCP())
+
+    async def fake_completion(*, model, messages, max_retries=3):
+        system_prompt = messages[0]["content"]
+        user_content = messages[1]["content"]
+        if "single company's filing language changed across time" in system_prompt:
+            assert "Gross margin" in user_content
+            older_section = user_content.split("Older filing excerpts:\n", 1)[1].split("\n\nNewer filing excerpts:\n", 1)[0]
+            newer_section = user_content.split("\n\nNewer filing excerpts:\n", 1)[1]
+            before_xbrl = re.findall(r"\[chunk_id: ([^\]]+xbrl_00)\]", older_section)
+            after_xbrl = re.findall(r"\[chunk_id: ([^\]]+xbrl_00)\]", newer_section)
+            assert len(before_xbrl) == 1
+            assert len(after_xbrl) == 1
+            return {
+                "window_summary": "Gross margin and SG&A ratio changed across annual filings.",
+                "changes": [
+                    {
+                        "change_id": "chg_1",
+                        "category": "pricing_or_margin_change",
+                        "summary": "Gross margin declined and SG&A as a share of revenue increased year over year.",
+                        "importance": "high",
+                        "confidence": "high",
+                        "before_chunk_ids": before_xbrl,
+                        "after_chunk_ids": after_xbrl,
+                    }
+                ],
+                "gaps": [],
+            }
+        return {"overall_summary": "Margins weakened across the annual comparison window."}
+
+    monkeypatch.setattr(svc, "_create_json_completion", fake_completion)
+
+    req = ChangeIntelligenceRequest(
+        ticker="STZ",
+        query="How have margins changed overtime?",
+        form_types=["10-K"],
+        filing_date_range=["2024-01-01", "2026-12-31"],
+        max_filings=3,
+        price_lookback="OFF",
+    )
+
+    result, from_cache = await svc.change_intelligence(req)
+
+    assert from_cache is False
+    assert len(result.comparison_windows) == 1
+    assert result.comparison_windows[0].label == "10-K 2026-04-22 vs 10-K 2025-04-23"
+    assert len(result.change_cards) == 1
+    assert result.change_cards[0].window_id == result.comparison_windows[0].window_id
+    assert result.change_cards[0].category == "pricing_or_margin_change"
+    assert result.change_cards[0].before_evidence[0].item_section == "xbrl_income_statement"
+    assert result.change_cards[0].after_evidence[0].item_section == "xbrl_income_statement"

@@ -696,6 +696,132 @@ async def test_market_gap_memo_chat_hides_repeated_only_citations(monkeypatch, t
     assert "No additional memo evidence" in result.note
 
 
+@pytest.mark.asyncio
+async def test_market_gap_memo_chat_names_companies_when_supported(monkeypatch, tmp_path):
+    from models import (
+        MarketGapResponse,
+        GapCluster,
+        PainPoint,
+        OpportunityMemo,
+        OpportunityMemoChatRequest,
+    )
+    from services import market_gap_service as svc
+
+    monkeypatch.setattr(svc, "MARKET_GAP_STATE_DIR", str(tmp_path))
+
+    cached = MarketGapResponse(
+        run_id="gap_chat_companies",
+        from_cache=False,
+        retrieval_version="test-version",
+        schema_version="memo-v1",
+        industry_summary="Industry summary",
+        market_structure_summary="Market structure",
+        gap_clusters=[
+            GapCluster(
+                cluster_id="cluster_1",
+                theme="Technology System Failures",
+                description="Legacy airline systems still fail.",
+                frequency=2,
+                total_companies=2,
+                company_tickers=["AAL", "DAL"],
+                evidence_count=2,
+                latest_filing_date="2026-02-15",
+                incumbents_stuck_reason="Legacy infrastructure and vendor lock-in slow replacement.",
+                incumbents_stuck_confidence="high",
+                hard_constraints=["Legacy operating systems are difficult to replace"],
+                soft_constraints=[],
+                buyer_owners=["operations", "IT"],
+                urgency_level="high",
+                persistence_level="recurring",
+                adoption_difficulty="medium",
+                why_now="Recent filings continue to describe outage risk.",
+                disconfirming_evidence=[],
+                cluster_score=0.82,
+                confidence="high",
+                pain_points=[
+                    PainPoint(
+                        company_ticker="AAL",
+                        text="Legacy crew systems and vendor outages disrupt operations.",
+                        category="technology",
+                        filing_date="2026-02-01",
+                        form_type="10-K",
+                        accession_number="1000000-26-000001",
+                        cik="1000000",
+                        chunk_ids=["AAL_2026_item_1a_00"],
+                        confidence="high",
+                        severity="severe",
+                        buyer_owner_hint="operations",
+                        recurrence_hint="recurring",
+                    ),
+                    PainPoint(
+                        company_ticker="DAL",
+                        text="Aging scheduling systems and vendor dependence create service outages.",
+                        category="technology",
+                        filing_date="2026-02-15",
+                        form_type="10-K",
+                        accession_number="2000000-26-000001",
+                        cik="2000000",
+                        chunk_ids=["DAL_2026_item_1a_00"],
+                        confidence="high",
+                        severity="severe",
+                        buyer_owner_hint="IT",
+                        recurrence_hint="worsening",
+                    ),
+                ],
+            )
+        ],
+        opportunity_memos=[
+            OpportunityMemo(
+                memo_id="memo_1",
+                title="Airline Resilience Layer",
+                target_cluster_id="cluster_1",
+                opportunity_type="infrastructure_tooling",
+                buyer_owner="operations",
+                problem="Legacy airline operating systems still create expensive disruption.",
+                thesis="A resilience layer could reduce outage spillover.",
+                pain_severity="severe",
+                urgency_level="high",
+                hard_constraint_strength="high",
+                adoption_difficulty="medium",
+                why_incumbents_are_stuck="Legacy systems are hard to replace quickly.",
+                why_now="Recent filings still describe outage risk.",
+                why_this_may_fail=["Airline procurement cycles are slow"],
+                evidence_chunk_ids=["AAL_2026_item_1a_00", "DAL_2026_item_1a_00"],
+                opportunity_status="strong",
+                status_rationale="Broad pain and hard constraints create a credible opening.",
+                opportunity_score=0.84,
+            )
+        ],
+        coverage_notes=[],
+    )
+    (tmp_path / "cached.json").write_text(cached.model_dump_json())
+
+    async def fake_completion(*, model, messages, max_retries=3):
+        payload = json.loads(messages[1]["content"])
+        assert payload["gap_cluster"]["company_tickers"] == ["AAL", "DAL"]
+        assert len(payload["gap_cluster"]["pain_points"]) == 2
+        assert payload["question"] == "What airlines are having these problems?"
+        return {
+            "answer": "AAL and DAL are the airlines explicitly tied to these operational technology problems in the current filings.",
+            "support_level": "supported",
+            "citation_chunk_ids": ["AAL_2026_item_1a_00", "DAL_2026_item_1a_00"],
+            "note": "Grounded in the memo's cited filing evidence.",
+        }
+
+    monkeypatch.setattr(svc, "_create_json_completion", fake_completion)
+
+    result = await svc.answer_opportunity_memo_chat(OpportunityMemoChatRequest(
+        run_id="gap_chat_companies",
+        memo_id="memo_1",
+        question="What airlines are having these problems?",
+    ))
+
+    assert result.support_level == "supported"
+    assert len(result.citations) == 2
+    assert {item.company_ticker for item in result.citations} == {"AAL", "DAL"}
+    assert "AAL and DAL" in result.answer
+
+
 def test_market_gap_chat_endpoint(monkeypatch):
     from main import app
     from models import OpportunityMemoChatResponse, OpportunityMemoCitation

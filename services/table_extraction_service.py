@@ -14,11 +14,14 @@ from openai import AsyncOpenAI
 import cost_tracker
 import edgar_client
 from config import (
+    LOCAL_CLASSIFIER_FALLBACK_TO_OPENAI,
     OPENAI_API_KEY,
     OPENAI_WORKER_MODEL,
     TABLE_CLASSIFIER_SYSTEM_PROMPT,
 )
 from models import FilingFinancials, FinancialTable
+from services import local_classifier_service
+from services.local_classifier_service import LocalClassifierError
 
 logger = logging.getLogger(__name__)
 
@@ -103,40 +106,66 @@ async def _classify_tables(
     ]
 
     try:
-        response = await _openai.chat.completions.create(
-            model=OPENAI_WORKER_MODEL,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": TABLE_CLASSIFIER_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps({"tables": previews})},
-            ],
-        )
-
-        if response.usage:
-            cost_tracker.record_llm(
-                OPENAI_WORKER_MODEL,
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens,
-            )
-
-        raw = json.loads(response.choices[0].message.content or "{}")
-        classifications: dict[str, dict] = {
-            item["table_id"]: item
-            for item in raw.get("tables", [])
-            if "table_id" in item
-        }
-
+        classifications = await local_classifier_service.classify_tables(previews)
         for table in tables:
             cls = classifications.get(table.table_id, {})
             table.title = cls.get("title", "")
             table.category = cls.get("category", "other")
 
         classified_count = sum(1 for t in tables if t.title)
-        note = f"LLM classified {classified_count}/{len(tables)} tables"
+        note = f"Ollama classified {classified_count}/{len(tables)} tables"
+
+    except LocalClassifierError as exc:
+        logger.warning("Ollama table classification failed: %s", exc)
+        cost_tracker.record_ollama_fallback()
+        if not LOCAL_CLASSIFIER_FALLBACK_TO_OPENAI:
+            return tables, f"Table classification skipped ({exc})"
+        try:
+            tables, note = await _classify_tables_openai(tables, previews)
+            note = f"{note} after Ollama fallback ({exc})"
+        except Exception as fallback_exc:
+            logger.warning("OpenAI table classification fallback failed: %s", fallback_exc)
+            note = f"Table classification skipped after Ollama and OpenAI failures ({fallback_exc})"
 
     except Exception as exc:
         logger.warning("Table classification failed: %s", exc)
         note = f"Table classification skipped ({exc})"
 
     return tables, note
+
+
+async def _classify_tables_openai(
+    tables: list[FinancialTable],
+    previews: list[dict],
+) -> tuple[list[FinancialTable], str]:
+    response = await _openai.chat.completions.create(
+        model=OPENAI_WORKER_MODEL,
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": TABLE_CLASSIFIER_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps({"tables": previews})},
+        ],
+    )
+
+    if response.usage:
+        cost_tracker.record_llm(
+            OPENAI_WORKER_MODEL,
+            response.usage.prompt_tokens,
+            response.usage.completion_tokens,
+        )
+
+    raw = json.loads(response.choices[0].message.content or "{}")
+    classifications: dict[str, dict] = {
+        item["table_id"]: item
+        for item in raw.get("tables", [])
+        if "table_id" in item
+    }
+
+    for table in tables:
+        cls = classifications.get(table.table_id, {})
+        table.title = cls.get("title", "")
+        table.category = cls.get("category", "other")
+
+    classified_count = sum(1 for t in tables if t.title)
+    return tables, f"OpenAI classified {classified_count}/{len(tables)} tables"

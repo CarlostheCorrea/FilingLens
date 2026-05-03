@@ -818,6 +818,7 @@ function renderAnswer(data) {
   const claims = getAuditClaims(data);
 
   renderCostRow(ans.cost_summary || null, 'answer');
+  logOllamaStatus(ans.cost_summary || null);
 
   if (overall.summary || keyPoints.length) {
     show('overall-answer-section');
@@ -898,13 +899,31 @@ function renderCostRow(cost, prefix) {
   const fmtN = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
   $(`${prefix}-cost-total`).textContent = `${usd} estimated`;
+
+  const ollamaPart = (cost.ollama_calls > 0)
+    ? ` · ${cost.ollama_calls} Ollama call${cost.ollama_calls !== 1 ? 's' : ''} (free · ${fmtN(cost.ollama_tokens)} tokens)`
+    : '';
+
   $(`${prefix}-cost-detail`).textContent =
-    `${cost.llm_calls} LLM call${cost.llm_calls !== 1 ? 's' : ''} · ` +
+    `${cost.llm_calls} OpenAI call${cost.llm_calls !== 1 ? 's' : ''} · ` +
     `${fmtN(cost.prompt_tokens)} prompt · ` +
     `${fmtN(cost.completion_tokens)} completion · ` +
-    `${fmtN(cost.embedding_tokens)} embedding tokens`;
+    `${fmtN(cost.embedding_tokens)} embedding tokens` +
+    ollamaPart;
 
   show(rowId);
+}
+
+function logOllamaStatus(cost) {
+  if (!cost) return;
+  if (cost.ollama_calls > 0) {
+    const n = cost.ollama_calls;
+    log(`llama3.1:8b handled ${n} classifier task${n !== 1 ? 's' : ''} locally (free)`, 'success');
+  }
+  if (cost.ollama_fallbacks > 0) {
+    const n = cost.ollama_fallbacks;
+    log(`llama3.1:8b unavailable — ${n} task${n !== 1 ? 's' : ''} fell back to OpenAI`, 'warn');
+  }
 }
 
 function renderRagasPanel(ragas) {
@@ -1232,6 +1251,7 @@ function renderCompare(data) {
 
   renderJudgePanel(data.judge_evaluation || null, 'compare');
   renderCostRow(data.cost_summary || null, 'compare');
+  logOllamaStatus(data.cost_summary || null);
 
   const comparisons = data.company_comparisons || [];
   $('compare-company-list').innerHTML = comparisons.map(buildCompareCompanyCard).join('');
@@ -1542,6 +1562,7 @@ function renderChangeIntelligence(data) {
 
   renderJudgePanel(data.judge_evaluation || null, 'change');
   renderCostRow(data.cost_summary || null, 'change');
+  logOllamaStatus(data.cost_summary || null);
 
   const filingEvents = data.filing_events || [];
   if (filingEvents.length) {
@@ -2146,6 +2167,7 @@ function renderMarketGap(data) {
 
   renderJudgePanel(data.judge_evaluation || null, 'gap');
   renderCostRow(data.cost_summary || null, 'gap');
+  logOllamaStatus(data.cost_summary || null);
 
   const memos = data.opportunity_memos || [];
   if (memos.length) {

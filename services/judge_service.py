@@ -10,6 +10,8 @@ from config import (
     MARKET_GAP_JUDGE_SYSTEM_PROMPT,
     OPENAI_JUDGE_MODEL,
 )
+import cost_tracker
+import logging_utils
 from models import (
     ChangeIntelligenceResponse,
     CompareResponse,
@@ -18,6 +20,8 @@ from models import (
     WorkflowAnswerResponse,
 )
 import rag_pipeline
+from services import local_classifier_service
+from services.local_classifier_service import LocalClassifierError
 
 
 def _answer_text(result: WorkflowAnswerResponse) -> str:
@@ -88,6 +92,41 @@ def _coerce_list(value) -> list[str]:
     return []
 
 
+async def _log_secondary_judge(scope: str, query: str, answer_text: str, evidence: list[dict] | None = None):
+    try:
+        judge = await local_classifier_service.secondary_judge({
+            "scope": scope,
+            "question": query,
+            "answer_text": answer_text,
+            "evidence": evidence or [],
+        })
+    except LocalClassifierError:
+        cost_tracker.record_ollama_fallback()
+        return
+    if judge:
+        logging_utils.log_secondary_judge(scope, query, judge)
+
+
+async def _safe_judge_completion(messages: list[dict], failure_summary: str) -> dict:
+    try:
+        return await _create_json_completion(
+            model=OPENAI_JUDGE_MODEL,
+            messages=messages,
+        )
+    except Exception as exc:
+        return {
+            "helpfulness": 1,
+            "clarity": 1,
+            "grounding": 1,
+            "citation_quality": 1,
+            "overclaiming_risk": "medium",
+            "overall_verdict": "weak",
+            "summary": failure_summary,
+            "strengths": [],
+            "concerns": [f"Primary judge execution failed: {exc}"],
+        }
+
+
 async def judge_answer(result: WorkflowAnswerResponse) -> JudgeEvaluation:
     answer_text = _answer_text(result)
     evidence = _evidence_payload(result)
@@ -106,9 +145,8 @@ async def judge_answer(result: WorkflowAnswerResponse) -> JudgeEvaluation:
             concerns=["No answer text was available to evaluate."],
         )
 
-    raw = await _create_json_completion(
-        model=OPENAI_JUDGE_MODEL,
-        messages=[
+    raw = await _safe_judge_completion(
+        [
             {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -120,9 +158,10 @@ async def judge_answer(result: WorkflowAnswerResponse) -> JudgeEvaluation:
                 ),
             },
         ],
+        "The primary judge could not complete for this answer.",
     )
 
-    return JudgeEvaluation(
+    evaluation = JudgeEvaluation(
         helpfulness=_coerce_score(raw.get("helpfulness")),
         clarity=_coerce_score(raw.get("clarity")),
         grounding=_coerce_score(raw.get("grounding")),
@@ -133,6 +172,8 @@ async def judge_answer(result: WorkflowAnswerResponse) -> JudgeEvaluation:
         strengths=_coerce_list(raw.get("strengths")),
         concerns=_coerce_list(raw.get("concerns")),
     )
+    await _log_secondary_judge("answer", result.query, answer_text, evidence)
+    return evaluation
 
 
 def _build_judge_evaluation(raw: dict) -> JudgeEvaluation:
@@ -200,9 +241,8 @@ async def judge_compare(result: CompareResponse, query: str) -> JudgeEvaluation:
         {"ticker": comp.ticker, "status": comp.status, "summary": comp.summary}
         for comp in result.company_comparisons
     ]
-    raw = await _create_json_completion(
-        model=OPENAI_JUDGE_MODEL,
-        messages=[
+    raw = await _safe_judge_completion(
+        [
             {"role": "system", "content": COMPARE_JUDGE_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -214,8 +254,11 @@ async def judge_compare(result: CompareResponse, query: str) -> JudgeEvaluation:
                 ),
             },
         ],
+        "The primary judge could not complete for this comparison.",
     )
-    return _build_judge_evaluation(raw)
+    evaluation = _build_judge_evaluation(raw)
+    await _log_secondary_judge("compare", query, answer_text, evidence)
+    return evaluation
 
 
 # ── Filing Change Intelligence Judge ─────────────────────────────────────────
@@ -272,9 +315,8 @@ async def judge_change(result: ChangeIntelligenceResponse, query: str) -> JudgeE
         }
         for card in result.change_cards
     ]
-    raw = await _create_json_completion(
-        model=OPENAI_JUDGE_MODEL,
-        messages=[
+    raw = await _safe_judge_completion(
+        [
             {"role": "system", "content": CHANGE_JUDGE_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -286,8 +328,11 @@ async def judge_change(result: ChangeIntelligenceResponse, query: str) -> JudgeE
                 ),
             },
         ],
+        "The primary judge could not complete for this change analysis.",
     )
-    return _build_judge_evaluation(raw)
+    evaluation = _build_judge_evaluation(raw)
+    await _log_secondary_judge("change_intelligence", query, answer_text, evidence)
+    return evaluation
 
 
 # ── Market Gap Discovery Judge ────────────────────────────────────────────────
@@ -350,9 +395,8 @@ async def judge_market_gap(result: MarketGapResponse, query: str) -> JudgeEvalua
         }
         for m in result.opportunity_memos
     ]
-    raw = await _create_json_completion(
-        model=OPENAI_JUDGE_MODEL,
-        messages=[
+    raw = await _safe_judge_completion(
+        [
             {"role": "system", "content": MARKET_GAP_JUDGE_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -364,5 +408,8 @@ async def judge_market_gap(result: MarketGapResponse, query: str) -> JudgeEvalua
                 ),
             },
         ],
+        "The primary judge could not complete for this market gap analysis.",
     )
-    return _build_judge_evaluation(raw)
+    evaluation = _build_judge_evaluation(raw)
+    await _log_secondary_judge("market_gap", query, answer_text, [])
+    return evaluation
